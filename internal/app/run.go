@@ -28,6 +28,9 @@ type RunOptions struct {
 	Backend      llm.Backend        // override (tests / eval)
 	PlanReviewer agent.PlanReviewer // override; default asks on the terminal
 	Approver     tools.Approver     // override; default asks on the terminal
+	// OnEvent receives every tool event (also recorded in the audit log),
+	// for editors that show live activity.
+	OnEvent func(kind string, data any)
 }
 
 // Run executes one task and produces a proposal. It never touches the
@@ -100,6 +103,9 @@ func (a *App) Run(ctx context.Context, o RunOptions) (*proposal.Proposal, error)
 	go func() {
 		for ev := range events {
 			sess.Record("tool_event:"+ev.Kind, ev.Data)
+			if o.OnEvent != nil {
+				o.OnEvent(ev.Kind, ev.Data)
+			}
 		}
 		close(done)
 	}()

@@ -29,6 +29,7 @@ import (
 	"github.com/sandy-t-shelvan/govcode/internal/modelpin"
 	"github.com/sandy-t-shelvan/govcode/internal/policy"
 	"github.com/sandy-t-shelvan/govcode/internal/proposal"
+	"github.com/sandy-t-shelvan/govcode/internal/rpc"
 	"github.com/sandy-t-shelvan/govcode/internal/sign"
 	"github.com/sandy-t-shelvan/govcode/internal/supply"
 )
@@ -48,6 +49,9 @@ Audit:
   govcode audit verify            verify hash chain, signatures, objects and git anchors
   govcode audit show [-n N] [-session ID]
   govcode audit object <sha256>   print a stored payload
+
+Editor integration:
+  govcode serve --stdio           JSON-RPC 2.0 over stdin/stdout for the VS Code extension (no sockets)
 
 Setup and supply chain:
   govcode verify                  preflight: policy, release signature, model lock, served model, sandbox, keys, audit
@@ -108,6 +112,8 @@ func main() {
 		err = cmdModel(ctx, args)
 	case "eval":
 		err = cmdEval(ctx, args)
+	case "serve":
+		err = cmdServe(ctx, args)
 	case "version", "-v", "--version":
 		fmt.Println("govcode", supply.Version)
 	case "help", "-h", "--help":
@@ -657,6 +663,17 @@ func cmdModel(ctx context.Context, args []string) error {
 		return eval.Smoke(ctx, b, os.Stdout)
 	}
 	return fmt.Errorf("unknown model subcommand %q", args[0])
+}
+
+func cmdServe(ctx context.Context, args []string) error {
+	fs, pol := flags("serve")
+	stdio := fs.Bool("stdio", false, "serve JSON-RPC on stdin/stdout (the only transport)")
+	parse(fs, args)
+	if !*stdio {
+		return errors.New("usage: govcode serve --stdio (network listeners are not supported)")
+	}
+	s := &rpc.Server{PolicyPath: *pol}
+	return s.Serve(ctx, os.Stdin, os.Stdout)
 }
 
 func cmdEval(ctx context.Context, args []string) error {
