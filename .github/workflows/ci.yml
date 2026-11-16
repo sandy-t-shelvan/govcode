@@ -1,29 +1,90 @@
-# Low-side CI only. The high side builds with scripts/build-release.sh.
+# Low-side CI. Every job must pass before a PR can merge (see CONTRIBUTING.md).
+# The high side builds with scripts/build-release.sh and the same toolchain.
 name: ci
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+  pull_request:
 permissions:
   contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  GO_VERSION: "1.27.4"
+  STATICCHECK_VERSION: "v0.8.2"
+  GOVULNCHECK_VERSION: "v1.9.0"
+  COVERAGE_FLOOR: "45"
+  GOTOOLCHAIN: local
+
 jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: "${{ env.GO_VERSION }}", cache: false }
+      - name: gofmt
+        run: test -z "$(gofmt -l . | tee /dev/stderr)"
+      - name: go vet
+        run: go vet ./...
+      - name: staticcheck
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@${STATICCHECK_VERSION}
+          "$(go env GOPATH)/bin/staticcheck" ./...
+      - name: no third-party modules
+        run: |
+          ! grep -qE '^\s*require' go.mod
+          test ! -e go.sum
+
+  security:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: "${{ env.GO_VERSION }}", cache: false }
+      - name: govulncheck (standard library and toolchain)
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}
+          "$(go env GOPATH)/bin/govulncheck" ./...
+
   test:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
-        with:
-          go-version: "1.24.7"
-      - name: toolchains for the legacy eval tasks
+        with: { go-version: "${{ env.GO_VERSION }}", cache: false }
+      - name: legacy toolchains for the eval tasks, and bubblewrap
         run: sudo apt-get update -qq && sudo apt-get install -y -qq gnat gnucobol bubblewrap
-      - name: allow unprivileged user namespaces for bubblewrap
+      - name: allow unprivileged user namespaces (bubblewrap)
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
-      - name: vet and test (offline module mode)
-        env:
-          GOPROXY: "off"
-          GOFLAGS: "-mod=readonly"
+      - name: tests with race detector and coverage floor
+        env: { GOPROXY: "off", GOFLAGS: "-mod=readonly" }
+        run: scripts/ci/coverage.sh "$COVERAGE_FLOOR"
+
+  fuzz:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: "${{ env.GO_VERSION }}", cache: false }
+      - name: fuzz every target (30s each)
+        run: scripts/ci/fuzz.sh 30
+      - name: keep crashers
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with: { name: fuzz-crashers, path: "**/testdata/fuzz/**" }
+
+  release:
+    runs-on: ubuntu-24.04
+    needs: [lint, security, test]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: "${{ env.GO_VERSION }}", cache: false }
+      - name: toolchains (release script runs the test suite)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq gnat gnucobol bubblewrap && (sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true)
+      - name: reproducible, signed release build
         run: |
-          test -z "$(gofmt -l .)"
-          go vet ./...
-          go test -count=1 ./...
-      - name: reproducible release build
-        run: |
-          go run ./cmd/govcode keygen -o /tmp/ci-release.key
-          scripts/build-release.sh ci /tmp/ci-release.key
+          go run ./cmd/govcode keygen -o "$RUNNER_TEMP/ci-release.key"
+          scripts/build-release.sh ci "$RUNNER_TEMP/ci-release.key"

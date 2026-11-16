@@ -48,7 +48,7 @@ govcode audit verify  -- chain, signatures, objects, and every anchor in main's 
 ## Quick start (development, warn mode)
 
 ```bash
-go build -o bin/govcode ./cmd/govcode        # Go >= 1.24, no network needed
+go build -o bin/govcode ./cmd/govcode        # Go 1.27.4 (pinned in go.mod), no network needed
 ```
 
 ```bash
@@ -102,6 +102,7 @@ For a classified deployment (strict mode, two-person rule, root-owned policy and
 - [docs/SUPPLY_CHAIN.md](docs/SUPPLY_CHAIN.md): what the security reviewer checks, model staging, SBOM and AI-BOM, FIPS
 - [docs/EVAL.md](docs/EVAL.md): measuring tool-call reliability on your hardware
 - [docs/ROADMAP.md](docs/ROADMAP.md): phase and ticket plan (mirrors Jira)
+- [CONTRIBUTING.md](CONTRIBUTING.md): branch, PR, CI gates and merge rules
 
 ## Layout
 

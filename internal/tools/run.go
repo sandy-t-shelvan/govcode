@@ -60,12 +60,14 @@ func (t *runCommand) Spec() llm.ToolSpec {
 var shellMeta = []string{";", "&&", "||", "|", "`", "$(", ">", "<", "\n", "&"}
 
 func (e *Env) allowlisted(cmd string) bool {
-	c := strings.TrimSpace(cmd)
+	// Check the raw string, not a trimmed copy: the decision must be about
+	// exactly the bytes that would run.
 	for _, m := range shellMeta {
-		if strings.Contains(c, m) {
+		if strings.Contains(cmd, m) {
 			return false
 		}
 	}
+	c := strings.TrimSpace(cmd)
 	for _, a := range e.Allowlist {
 		if c == a || strings.HasPrefix(c, a+" ") {
 			return true

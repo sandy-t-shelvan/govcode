@@ -2,6 +2,7 @@ package llm
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -120,5 +121,18 @@ func TestValidateArgs(t *testing.T) {
 	}
 	if _, err := ValidateArgs(spec, json.RawMessage(`{"path":"a","limit":"lots"}`)); err == nil {
 		t.Error("bad integer not reported")
+	}
+}
+
+func TestUnparseableArgsReportedToModel(t *testing.T) {
+	for _, raw := range []string{`{0}`, `[1,2]`, `"just text"`, `42`} {
+		a := normalizeArgs(json.RawMessage(raw))
+		if !json.Valid(a) {
+			t.Fatalf("normalizeArgs(%q) produced invalid JSON %q", raw, a)
+		}
+		_, err := ValidateArgs(testTools[0], a)
+		if err == nil || !strings.Contains(err.Error(), "not a valid JSON object") {
+			t.Errorf("args %q: want unparseable error, got %v", raw, err)
+		}
 	}
 }

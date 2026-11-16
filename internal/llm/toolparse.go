@@ -209,9 +209,34 @@ func normalizeArgs(raw json.RawMessage) json.RawMessage {
 		}
 	}
 	if json.Valid([]byte(t)) {
-		return json.RawMessage(t)
+		return objectOrMarker(t)
 	}
-	return json.RawMessage(RepairJSON(t))
+	if r := RepairJSON(t); json.Valid([]byte(r)) {
+		return objectOrMarker(r)
+	}
+	return unparseable(t)
+}
+
+// UnparseableKey marks arguments that could not be turned into a JSON
+// object; ValidateArgs reports them to the model instead of guessing.
+const UnparseableKey = "_govcode_unparseable_arguments"
+
+func unparseable(raw string) json.RawMessage {
+	if len(raw) > 500 {
+		raw = raw[:500]
+	}
+	b, _ := json.Marshal(map[string]string{UnparseableKey: raw})
+	return b
+}
+
+// objectOrMarker accepts only a JSON object; arrays, strings and numbers
+// are reported as unparseable arguments.
+func objectOrMarker(s string) json.RawMessage {
+	var m map[string]any
+	if json.Unmarshal([]byte(s), &m) != nil {
+		return unparseable(s)
+	}
+	return json.RawMessage(s)
 }
 
 var reTrailingComma = regexp.MustCompile(`,\s*([}\]])`)

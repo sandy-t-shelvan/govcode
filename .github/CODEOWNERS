@@ -1,0 +1,13 @@
+# Every change needs review from the code owner. Security-critical paths
+# are listed explicitly so they can later be assigned to a security reviewer.
+*                       @sandy-t-shelvan
+/internal/netguard/     @sandy-t-shelvan
+/internal/audit/        @sandy-t-shelvan
+/internal/sign/         @sandy-t-shelvan
+/internal/keyring/      @sandy-t-shelvan
+/internal/proposal/     @sandy-t-shelvan
+/internal/policy/       @sandy-t-shelvan
+/internal/tools/exec.go @sandy-t-shelvan
+/internal/tools/jail.go @sandy-t-shelvan
+/.github/               @sandy-t-shelvan
+/scripts/build-release.sh @sandy-t-shelvan

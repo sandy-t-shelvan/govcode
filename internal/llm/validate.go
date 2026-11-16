@@ -22,6 +22,9 @@ func ValidateArgs(spec ToolSpec, raw json.RawMessage) (map[string]any, error) {
 	if args == nil {
 		args = map[string]any{}
 	}
+	if raw, ok := args[UnparseableKey]; ok {
+		return nil, fmt.Errorf("arguments to %s were not a valid JSON object (got %q). Send arguments as a JSON object with: %s", spec.Name, fmt.Sprint(raw), describe(spec))
+	}
 	var problems []string
 	for _, r := range spec.Required {
 		if v, ok := args[r]; !ok || v == nil {
