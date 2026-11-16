@@ -526,7 +526,7 @@ func cmdSign(args []string) error {
 	key := fs.String("key", "", "private key (release or model-signing key)")
 	fs.Parse(args)
 	if *key == "" || fs.NArg() == 0 {
-		return errors.New("usage: govcode sign -key <k> <file>...")
+		return errors.New("usage: govcode sign -key <k> <file> [file ...]")
 	}
 	s, err := sign.LoadSigner(*key)
 	if err != nil {

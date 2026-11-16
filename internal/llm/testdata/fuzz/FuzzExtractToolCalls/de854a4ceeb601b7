@@ -1,0 +1,2 @@
+go test fuzz v1
+string("[TOOL_CALLS]0[ARGS]{0}")

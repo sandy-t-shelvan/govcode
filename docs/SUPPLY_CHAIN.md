@@ -8,7 +8,8 @@
 | No hidden network | `TestNoHiddenNetwork` fails the build if anything but `netguard`/`llm` imports a network package or bypasses the loopback-only client. A planted `http.Get` was confirmed to fail it. |
 | No downloads at build time | `scripts/build-release.sh` sets `GOPROXY=off GOFLAGS=-mod=readonly GOTOOLCHAIN=local`. |
 | Reproducible | The script builds twice and fails if the two SHA-256s differ (`-trimpath -buildvcs=false -ldflags=-buildid=`, `CGO_ENABLED=0`). Rebuild from the same commit with the same Go version to get the same hash. |
-| FIPS 140-3 crypto | `GOFIPS140=v1.0.0` links the Go Cryptographic Module; `go version -m` shows `DefaultGODEBUG=fips140=on`. Ed25519 (FIPS 186-5) and SHA-256 are its only algorithms in use. Confirm CMVP status with your reviewer. |
+| FIPS 140-3 crypto | `GOFIPS140=v1.0.0` links Go Cryptographic Module v1.0.0, which the Go 1.27.4 toolchain lists as **certified** (`$(go env GOROOT)/lib/fips140/certified.txt` → `v1.0.0-c2097c7c`); `go version -m` shows `DefaultGODEBUG=fips140=on`. Ed25519 (FIPS 186-5) and SHA-256 are the only algorithms in use. Record the CMVP certificate number in the ATO package. |
+| Patched toolchain | `go.mod` requires Go `1.27.4`, so older toolchains refuse to build. Go 1.24.7 had 36 reachable standard-library vulnerabilities; govulncheck reports none for 1.27.4 and runs in CI on every PR. |
 | Signed | `manifest.json` lists every file in the release with its SHA-256 and is signed with the release key (`manifest.json.sig`). |
 | Self-check at runtime | In strict mode, `govcode` hashes its own executable and refuses to run unless that hash is in the signed manifest. |
 

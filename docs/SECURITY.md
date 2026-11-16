@@ -56,7 +56,7 @@ See [SUPPLY_CHAIN.md](SUPPLY_CHAIN.md). In strict mode the binary refuses to sta
 ## Known limitations (read before an ATO)
 
 1. **Signing keys are files.** A user's key is protected by file permissions (0600, owner check). Anyone with that user's uid, or root, can sign as them. To bind keys to a person, put them on a PIV/CAC token or an HSM. The `sign.Signer` interface is the integration point; a PKCS#11 signer is not implemented yet.
-2. **FIPS.** The release build links the Go Cryptographic Module in FIPS 140-3 mode (`GOFIPS140=v1.0.0`; `GODEBUG=fips140=on` is the default). Confirm the module's current CMVP certificate status with your crypto reviewer; this repository makes no claim about it.
+2. **FIPS.** The release build links Go Cryptographic Module v1.0.0 in FIPS 140-3 mode (`GOFIPS140=v1.0.0`; `GODEBUG=fips140=on` is the default). The Go 1.27.4 toolchain lists v1.0.0 as certified (`lib/fips140/certified.txt`). Your crypto reviewer should still record the CMVP certificate number in the ATO package.
 3. **Truncation detection needs landed commits.** Activity after the last landed commit, such as proposals that were rejected or never decided, is protected by the chain and `chattr +a` but has no git anchor. Copy the log head (`govcode audit verify` prints it) to WORM media or your SIEM on a schedule.
 4. **The sandbox depends on the kernel.** Without unprivileged user namespaces, `sandbox.mode: required` refuses to run, which is correct. `best-effort` falls back to running commands unsandboxed and records `sandbox=none` in the audit log.
 5. **The model can be wrong.** The approval step is the control. The test gate and the diff review reduce risk but do not replace code review.
