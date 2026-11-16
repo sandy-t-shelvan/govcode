@@ -1,0 +1,175 @@
+// Package modelpin verifies that the model being served is exactly the one
+// pinned in the signed lock file.
+package modelpin
+
+import (
+	"context"
+	"crypto/ed25519"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/sandy-t-shelvan/govcode/internal/llm"
+	"github.com/sandy-t-shelvan/govcode/internal/sign"
+)
+
+const Unfilled = "FILL_AT_STAGING"
+
+type File struct {
+	Path        string `json:"path"`
+	Size        int64  `json:"size"`
+	SHA256      string `json:"sha256"`
+	GitBlobSHA1 string `json:"git_blob_sha1,omitempty"`
+}
+
+type Source struct {
+	Repo       string `json:"repo"`
+	Revision   string `json:"revision"`
+	Files      []File `json:"files"`
+	Format     string `json:"format,omitempty"`
+	Quant      string `json:"quantization,omitempty"`
+	ProducedBy string `json:"produced_by,omitempty"`
+	Note       string `json:"note,omitempty"`
+}
+
+type Serve struct {
+	OllamaName     string  `json:"ollama_name"`
+	NumCtx         int     `json:"num_ctx"`
+	MaxTokens      int     `json:"max_tokens"`
+	Temperature    float64 `json:"temperature"`
+	VLLMToolParser string  `json:"vllm_tool_call_parser"`
+	OllamaDigest   string  `json:"ollama_manifest_digest"`
+}
+
+type Model struct {
+	ID        string  `json:"id"`
+	Default   bool    `json:"default,omitempty"`
+	Name      string  `json:"name"`
+	License   string  `json:"license"`
+	Publisher string  `json:"publisher"`
+	Upstream  Source  `json:"upstream"`
+	Artifact  Source  `json:"artifact"`
+	Prequant  *Source `json:"reference_prequantized,omitempty"`
+	Serve     Serve   `json:"serve"`
+}
+
+type Lock struct {
+	Schema string  `json:"schema"`
+	Models []Model `json:"models"`
+}
+
+func Parse(data []byte) (*Lock, error) {
+	var l Lock
+	if err := json.Unmarshal(data, &l); err != nil {
+		return nil, err
+	}
+	if l.Schema != "govcode.models.lock/v1" {
+		return nil, fmt.Errorf("unknown lock schema %q", l.Schema)
+	}
+	return &l, nil
+}
+
+// LoadVerified loads the lock only if its detached signature verifies
+// against one of the trusted model-signing keys.
+func LoadVerified(path string, trusted []ed25519.PublicKey) (*Lock, string, error) {
+	data, kid, err := sign.VerifyFile(path, trusted...)
+	if err != nil {
+		return nil, "", err
+	}
+	l, err := Parse(data)
+	return l, kid, err
+}
+
+func Load(path string) (*Lock, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return Parse(data)
+}
+
+func (l *Lock) Find(id string) (*Model, error) {
+	for i := range l.Models {
+		if l.Models[i].ID == id || (id == "" && l.Models[i].Default) {
+			return &l.Models[i], nil
+		}
+	}
+	return nil, fmt.Errorf("model %q not in lock file", id)
+}
+
+// Problem is one verification failure.
+type Problem struct {
+	Path string
+	Msg  string
+}
+
+// VerifyArtifacts streams every staged artifact file under dir/weights and
+// checks size and SHA-256. Unfilled hashes are a failure: a lock that has not
+// been through staging must never be trusted.
+func VerifyArtifacts(m *Model, dir string, progress func(string)) []Problem {
+	var probs []Problem
+	for _, f := range m.Artifact.Files {
+		p := filepath.Join(dir, "weights", f.Path)
+		if f.SHA256 == "" || f.SHA256 == Unfilled {
+			probs = append(probs, Problem{p, "lock has no SHA-256 for this file (not staged)"})
+			continue
+		}
+		if progress != nil {
+			progress(p)
+		}
+		sum, size, err := HashFile(p)
+		if err != nil {
+			probs = append(probs, Problem{p, err.Error()})
+			continue
+		}
+		if f.Size > 0 && size != f.Size {
+			probs = append(probs, Problem{p, fmt.Sprintf("size %d, lock says %d", size, f.Size)})
+		}
+		if sum != f.SHA256 {
+			probs = append(probs, Problem{p, fmt.Sprintf("sha256 %s, lock says %s", sum, f.SHA256)})
+		}
+	}
+	return probs
+}
+
+func HashFile(path string) (string, int64, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", 0, err
+	}
+	defer f.Close()
+	h := sha256.New()
+	n, err := io.Copy(h, f)
+	if err != nil {
+		return "", 0, err
+	}
+	return hex.EncodeToString(h.Sum(nil)), n, nil
+}
+
+// CheckOllama confirms the model Ollama will serve has the pinned manifest
+// digest. A model re-pulled, re-created or swapped on disk changes digest.
+func CheckOllama(ctx context.Context, baseURL string, m *Model) error {
+	want := strings.TrimPrefix(m.Serve.OllamaDigest, "sha256:")
+	if want == "" || want == Unfilled {
+		return fmt.Errorf("lock has no ollama_manifest_digest for %s (not staged)", m.ID)
+	}
+	models, err := llm.ListOllamaModels(ctx, baseURL)
+	if err != nil {
+		return fmt.Errorf("cannot query ollama at %s: %w", baseURL, err)
+	}
+	for _, om := range models {
+		if om.Name == m.Serve.OllamaName || om.Name == m.Serve.OllamaName+":latest" {
+			got := strings.TrimPrefix(om.Digest, "sha256:")
+			if got != want {
+				return fmt.Errorf("ollama model %s digest %s does not match pinned %s", om.Name, got, want)
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("ollama does not have model %s", m.Serve.OllamaName)
+}
