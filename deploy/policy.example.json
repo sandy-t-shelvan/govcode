@@ -100,5 +100,8 @@
     ]
   },
   "site_instructions": "/etc/govcode/site-instructions.md",
-  "require_plan_approval": true
+  "require_plan_approval": true,
+  "siem": {
+    "syslog": true
+  }
 }

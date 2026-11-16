@@ -81,6 +81,12 @@ type Hooks struct {
 	PreProposal []string `json:"pre_proposal"`
 }
 
+// SIEM exports security events to the local syslog socket.
+type SIEM struct {
+	Syslog bool   `json:"syslog"`
+	Socket string `json:"socket,omitempty"` // default /dev/log
+}
+
 type Audit struct {
 	RequireAppendOnly bool `json:"require_append_only"`
 }
@@ -111,6 +117,7 @@ type Policy struct {
 	// into every task prompt, before the repository's GOVCODE.md.
 	SiteInstructions    string  `json:"site_instructions,omitempty"`
 	RequirePlanApproval bool    `json:"require_plan_approval,omitempty"`
+	SIEM                SIEM    `json:"siem"`
 	Sandbox             Sandbox `json:"sandbox"`
 	Trust               Trust   `json:"trust"`
 	Audit               Audit   `json:"audit"`

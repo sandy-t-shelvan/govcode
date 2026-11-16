@@ -5,6 +5,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -13,7 +14,9 @@ import (
 // llm packages can touch the network, and that nothing bypasses netguard's
 // loopback-only client (http.Get, http.DefaultClient, net.Dial, ...).
 func TestNoHiddenNetwork(t *testing.T) {
-	allowedNet := map[string]bool{"internal/netguard": true, "internal/llm": true}
+	allowedNet := map[string]bool{"internal/netguard": true, "internal/llm": true, "internal/siem": true}
+	// internal/siem may only use Unix-domain datagram sockets (/dev/log).
+	siemAllowed := map[string]bool{"DialUnix": true, "UnixAddr": true, "UnixConn": true}
 	forbiddenCalls := []string{"http.Get(", "http.Post(", "http.PostForm(", "http.Head(", "http.DefaultClient", "http.DefaultTransport", "net.Dial(", "net.DialTimeout(", "tls.Dial(", "net.Listen(", "http.ListenAndServe"}
 	root := "../.."
 	fset := token.NewFileSet()
@@ -34,6 +37,17 @@ func TestNoHiddenNetwork(t *testing.T) {
 			}
 			if strings.Contains(path, ".") && !strings.HasPrefix(path, "github.com/sandy-t-shelvan/govcode/") {
 				t.Errorf("%s imports third-party module %s; govcode is stdlib-only", rel, path)
+			}
+		}
+		if pkg == "internal/siem" {
+			src, _ := os.ReadFile(p)
+			for _, m := range regexp.MustCompile(`\bnet\.(\w+)`).FindAllStringSubmatch(string(src), -1) {
+				if !siemAllowed[m[1]] {
+					t.Errorf("%s uses net.%s; internal/siem may only use Unix-domain sockets", rel, m[1])
+				}
+			}
+			if strings.Contains(string(src), `"tcp`) || strings.Contains(string(src), `"udp`) {
+				t.Errorf("%s mentions a TCP/UDP network", rel)
 			}
 		}
 		if pkg != "internal/netguard" {

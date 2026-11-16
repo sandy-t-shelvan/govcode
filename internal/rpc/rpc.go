@@ -369,7 +369,8 @@ func (s *Server) run(ctx context.Context, raw json.RawMessage) (any, error) {
 	}()
 	opts := app.RunOptions{Task: p.Task, Plan: p.Plan, Interactive: true,
 		Approver: rpcApprover{s, rctx}, PlanReviewer: rpcPlanReviewer{s, rctx},
-		OnEvent: func(kind string, data any) { s.notify("event", map[string]any{"kind": kind, "data": data}) }}
+		OnEvent: func(kind string, data any) { s.notify("event", map[string]any{"kind": kind, "data": data}) },
+		OnToken: func(t string) { s.notify("event", map[string]any{"kind": "token", "text": t}) }}
 	if s.NewBackend != nil {
 		b, err := s.NewBackend()
 		if err != nil {

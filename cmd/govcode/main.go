@@ -170,7 +170,8 @@ func cmdRun(ctx context.Context, args []string) error {
 		fmt.Fprintln(os.Stderr, "warning:", w)
 	}
 	banner(a)
-	p, err := a.Run(ctx, app.RunOptions{Task: task, Interactive: !*yes, Verbose: *verbose, Plan: *plan})
+	p, err := a.Run(ctx, app.RunOptions{Task: task, Interactive: !*yes, Verbose: *verbose, Plan: *plan,
+		OnToken: func(s string) { fmt.Print(s) }})
 	if p != nil {
 		fmt.Printf("\nProposal %s: %s\n  branch %s (%s..%s)\n  files: %s\n  tests: %s runs=%d passed=%v\n",
 			p.ID, p.Status, p.Branch, p.Base[:10], p.Head[:10], strings.Join(p.Files, ", "), p.Tests.Command, p.Tests.Runs, p.Tests.Passed)
@@ -373,6 +374,11 @@ func cmdAudit(args []string) error {
 			for _, p := range r.Problems {
 				fmt.Println("  FAIL", p)
 			}
+			head := ""
+			if r.Head != nil {
+				head = fmt.Sprintf("%d:%s", r.Head.Seq, r.Head.Hash)
+			}
+			a.ReportAuditFailure(len(r.Problems), head)
 			return fmt.Errorf("audit log verification FAILED (%d problems)", len(r.Problems))
 		}
 		fmt.Println("audit log verified: chain intact, all signatures valid, all anchors present")

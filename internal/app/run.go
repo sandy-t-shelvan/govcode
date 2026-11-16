@@ -31,6 +31,8 @@ type RunOptions struct {
 	// OnEvent receives every tool event (also recorded in the audit log),
 	// for editors that show live activity.
 	OnEvent func(kind string, data any)
+	// OnToken streams model text (line by line, spillage-checked).
+	OnToken func(string)
 }
 
 // Run executes one task and produces a proposal. It never touches the
@@ -122,7 +124,7 @@ func (a *App) Run(ctx context.Context, o RunOptions) (*proposal.Proposal, error)
 	fmt.Fprintf(a.Out, "govcode %s | %s | proposal %s\nmodel %s, num_ctx=%d, sandbox=%v\n",
 		p.Classification, a.User, id, modelID, backend.Options().NumCtx, runner.Sandboxed())
 	ag := &agent.Agent{Backend: backend, Tools: tools.NewSet(env), Rec: sess,
-		Cfg: agent.Config{MaxTurns: p.MaxTurns, Out: a.Out, Verbose: o.Verbose, PlanMode: planMode}}
+		Cfg: agent.Config{MaxTurns: p.MaxTurns, Out: a.Out, Verbose: o.Verbose, PlanMode: planMode, OnToken: o.OnToken}}
 	if planMode {
 		ag.PlanReviewer = o.PlanReviewer
 		if ag.PlanReviewer == nil {

@@ -67,6 +67,7 @@ function describeEvent(ev) {
   const d = (ev && ev.data) || {};
   switch (ev && ev.kind) {
     case 'log': return String(ev.text || '').trimEnd();
+    case 'token': return String(ev.text || '').trimEnd();
     case 'edit': return `edited ${d.path}`;
     case 'test': return `tests ${d.exit_code === 0 ? 'PASSED' : 'FAILED'} (exit ${d.exit_code})`;
     case 'command': return `ran: ${d.result && d.result.command} (exit ${d.result && d.result.exit_code})`;

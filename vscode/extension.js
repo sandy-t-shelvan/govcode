@@ -63,7 +63,7 @@ async function ensureServer() {
   rpc.on('event', (ev) => {
     const line = util.describeEvent(ev);
     if (!line) return;
-    const cls = ev.kind === 'log' ? 'info' : ev.kind === 'spillage_blocked' ? 'warn' : 'tool';
+    const cls = ev.kind === 'log' || ev.kind === 'token' ? 'info' : ev.kind === 'spillage_blocked' ? 'warn' : 'tool';
     post({ type: 'line', cls, text: line });
   });
   rpc.on('run.finished', (r) => {
