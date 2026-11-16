@@ -1,0 +1,37 @@
+{
+  "schema": "govcode.policy/v1",
+  "classification": "SECRET//NOFORN",
+  "repo_root": "/srv/git/work/radar-fw",
+  "state_dir": "/var/lib/govcode/radar-fw",
+  "target_branch": "main",
+  "sensitive": true,
+  "two_person_rule": true,
+  "approvers": ["jdoe", "asmith"],
+  "proposers": [],
+  "allow_non_interactive_approval": false,
+  "max_turns": 40,
+  "model": {
+    "backend": "ollama",
+    "endpoint": "http://127.0.0.1:11434",
+    "lock": "/opt/govcode/models/models.lock.json",
+    "id": "qwen3-coder-30b-a3b",
+    "num_ctx": 32768,
+    "max_tokens": 4096,
+    "temperature": 0.2,
+    "verify_digest": true
+  },
+  "tests": { "command": "make test", "timeout_seconds": 900, "require_pass": true },
+  "commands": {
+    "allowlist": ["make", "cmake --build", "gcc", "g++", "cc", "gnatmake", "gprbuild", "cobc", "gfortran"],
+    "prompt_for_others": true
+  },
+  "sandbox": { "mode": "required", "extra_ro_paths": ["/opt/gnat"], "env": [] },
+  "trust": {
+    "enforce": "strict",
+    "release_keys": ["/etc/govcode/trust/release.pub"],
+    "release_manifest": "/opt/govcode/manifest.json",
+    "model_keys": ["/etc/govcode/trust/models.pub"],
+    "keyring_dir": "/etc/govcode/keys"
+  },
+  "audit": { "require_append_only": true }
+}
