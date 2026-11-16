@@ -51,6 +51,11 @@
 - Before a proposal is saved, its added lines are scanned for private keys, cloud and Git tokens, JWTs, credentials in URLs, password assignments and high-entropy strings. Hex digests are ignored, because hashes are normal in code.
 - A finding marks the proposal `blocked` with file, line and kind. The value itself is never stored, logged or displayed. Known-safe lines can be allowed only by regex in the root-owned policy (`secrets.allow`).
 
+### 2d. Plan mode, site hooks, project memory
+- **Plan mode** (`govcode run --plan`, or `require_plan_approval` in policy): the model gets only read tools plus `propose_plan`. A human approves or rejects the plan at the terminal, and a rejection's feedback goes back to the model. Edit, test and command tools unlock only after approval. The approved plan is pinned into the task message so context trimming can't drop it. Plans get the spillage check before a human sees them. Plan, decision and feedback are audit-logged.
+- **Site hooks** (`hooks.post_edit`, `hooks.pre_proposal`): checks the ISSO defines, such as cppcheck or GNAT style. They are defined **only** in the root-owned policy, never in the repository. They run in the same sandbox as other commands, with `GOVCODE_CHANGED_FILES` set. A failing post-edit check is reported back to the model so it can fix the problem. A failing pre-proposal check marks the proposal `blocked`. Every run and its output is audit-logged. Examples are in `deploy/hooks/`.
+- **Project memory**: `site_instructions` (a root-owned file named in policy), then the repository's root `GOVCODE.md`, both loaded into the task prompt. A subdirectory's `GOVCODE.md` is added the first time the model reads a file there. The total is capped at about an eighth of `num_ctx`. Each file's SHA-256 is audit-logged, each passes the spillage check, and a `GOVCODE.md` change the model makes goes through normal proposal review.
+
 ### 3. Attribution and provenance (audit log)
 - Every model request and response, tool call and result, command and its output, test run, proposal, approval, rejection and landing is an entry.
 - Entry hash = SHA-256 over the canonical JSON of the entry, which includes `prev`, the previous entry's hash. The entry is signed with Ed25519 by the acting user's key. Large content goes to a content-addressed object store referenced by hash.

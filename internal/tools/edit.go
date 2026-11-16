@@ -30,7 +30,7 @@ func (t *editFile) Spec() llm.ToolSpec {
 
 var reLineNumPrefix = regexp.MustCompile(`(?m)^ *\d+\| ?`)
 
-func (t *editFile) Run(_ context.Context, a map[string]any) (string, error) {
+func (t *editFile) Run(ctx context.Context, a map[string]any) (string, error) {
 	rel := str(a, "path")
 	abs, err := t.e.Jail.Resolve(rel)
 	if err != nil {
@@ -87,7 +87,7 @@ func (t *editFile) Run(_ context.Context, a map[string]any) (string, error) {
 	t.e.EditGen++
 	t.e.Changed[t.e.Jail.Rel(abs)] = true
 	t.e.emit("edit", map[string]any{"path": t.e.Jail.Rel(abs), "replacements": count})
-	return fmt.Sprintf("Edited %s (%d replacement(s))%s.\n%s", rel, map[bool]int{true: count, false: 1}[n == -1], note, fileDiff(t.e.Jail.Root, abs)), nil
+	return fmt.Sprintf("Edited %s (%d replacement(s))%s.\n%s%s", rel, map[bool]int{true: count, false: 1}[n == -1], note, fileDiff(t.e.Jail.Root, abs), t.e.postEdit(ctx, t.e.Jail.Rel(abs))), nil
 }
 
 func toCRLF(s string) string {
@@ -154,7 +154,7 @@ func (t *createFile) Spec() llm.ToolSpec {
 		}, Required: []string{"path", "content"}}
 }
 
-func (t *createFile) Run(_ context.Context, a map[string]any) (string, error) {
+func (t *createFile) Run(ctx context.Context, a map[string]any) (string, error) {
 	rel := str(a, "path")
 	abs, err := t.e.Jail.Resolve(rel)
 	if err != nil {
@@ -178,5 +178,5 @@ func (t *createFile) Run(_ context.Context, a map[string]any) (string, error) {
 	t.e.EditGen++
 	t.e.Changed[t.e.Jail.Rel(abs)] = true
 	t.e.emit("edit", map[string]any{"path": t.e.Jail.Rel(abs), "created": true})
-	return fmt.Sprintf("Wrote %s (%d bytes).", rel, len(str(a, "content"))), nil
+	return fmt.Sprintf("Wrote %s (%d bytes).%s", rel, len(str(a, "content")), t.e.postEdit(ctx, t.e.Jail.Rel(abs))), nil
 }

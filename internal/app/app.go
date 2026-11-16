@@ -279,6 +279,35 @@ func (t *TTYApprover) Approve(cmd string) (bool, string) {
 	return ok, t.User.Username
 }
 
+// TTYPlanReviewer shows the plan on the terminal and asks for a decision.
+type TTYPlanReviewer struct{}
+
+func (TTYPlanReviewer) ReviewPlan(steps []string, summary string) (bool, string) {
+	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	if err != nil {
+		return false, "no terminal attached"
+	}
+	defer tty.Close()
+	fmt.Fprintf(tty, "\n  Proposed plan: %s\n", summary)
+	for i, s := range steps {
+		fmt.Fprintf(tty, "    %d. %s\n", i+1, s)
+	}
+	fmt.Fprint(tty, "\n  [a]pprove, [r]eject with feedback: ")
+	r := bufio.NewReader(tty)
+	ans, _ := r.ReadString('\n')
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(ans)), "a") {
+		fmt.Fprint(tty, "  Notes for the model (optional): ")
+		notes, _ := r.ReadString('\n')
+		return true, strings.TrimSpace(notes)
+	}
+	fmt.Fprint(tty, "  What should change? ")
+	fb, _ := r.ReadString('\n')
+	if strings.TrimSpace(fb) == "" {
+		fb = "rejected without comment"
+	}
+	return false, strings.TrimSpace(fb)
+}
+
 // ConfirmTTY requires the human to type a word at the terminal.
 func ConfirmTTY(prompt, word string) bool {
 	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)

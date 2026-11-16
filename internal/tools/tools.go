@@ -2,7 +2,11 @@ package tools
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -38,8 +42,16 @@ type Env struct {
 	// marked above it is withheld from the model and blocks proposals.
 	// The zero value is UNCLASSIFIED, the strictest setting, so an
 	// unconfigured Env fails safe. marking.Unknown disables the guard.
-	MaxLevel    marking.Level
-	RequireTest bool // finish is refused until tests pass after the last edit
+	MaxLevel marking.Level
+	// PostEditHooks are site checks (from the root-owned policy only) run
+	// in the sandbox after every successful edit, with the changed path in
+	// GOVCODE_CHANGED_FILES. A failure is reported back to the model.
+	PostEditHooks []string
+	HookFailures  int
+	// Memory: GOVCODE.md files already loaded, and the remaining byte budget.
+	MemoryLoaded map[string]bool
+	MemoryBudget int
+	RequireTest  bool // finish is refused until tests pass after the last edit
 
 	Plan         []string
 	EditGen      int // incremented on every successful edit
@@ -120,6 +132,77 @@ func clip(s string, n int) string {
 		return s[:n] + "…"
 	}
 	return s
+}
+
+// RunHooks runs each hook with GOVCODE_HOOK and GOVCODE_CHANGED_FILES set.
+// It returns a report of failures ("" when all pass).
+func (e *Env) RunHooks(ctx context.Context, stage string, hooks []string, changed []string) string {
+	var b strings.Builder
+	for _, h := range hooks {
+		r := e.Runner.RunWith(ctx, h, 5*time.Minute, []string{"GOVCODE_HOOK=" + stage, "GOVCODE_CHANGED_FILES=" + strings.Join(changed, " ")})
+		ok := r.ExitCode == 0 && !r.TimedOut
+		if !ok && e.spill("hook output", r.Output) {
+			r.Output = withheld("hook output", e)
+		}
+		e.emit("hook", map[string]any{"stage": stage, "command": h, "exit_code": r.ExitCode, "passed": ok, "output": clip(r.Output, 4000)})
+		if !ok {
+			fmt.Fprintf(&b, "Site check %q failed (exit %d):\n%s\n", h, r.ExitCode, clip(r.Output, 3000))
+		}
+	}
+	return b.String()
+}
+
+func (e *Env) postEdit(ctx context.Context, rel string) string {
+	if len(e.PostEditHooks) == 0 {
+		return ""
+	}
+	rep := e.RunHooks(ctx, "post_edit", e.PostEditHooks, []string{rel})
+	if rep != "" {
+		e.HookFailures++
+		return "\n" + rep + "Fix the problems the site checks report; the proposal cannot be approved while they fail."
+	}
+	return ""
+}
+
+// MemoryFile is the per-directory conventions file.
+const MemoryFile = "GOVCODE.md"
+
+// memoryFor returns the GOVCODE.md files between the repo root (exclusive,
+// it is loaded into the task prompt) and dir that have not been loaded
+// yet, within the byte budget.
+func (e *Env) memoryFor(relDir string) string {
+	if e.MemoryLoaded == nil {
+		e.MemoryLoaded = map[string]bool{}
+	}
+	var dirs []string
+	for d := relDir; d != "." && d != "/" && d != ""; d = filepath.Dir(d) {
+		dirs = append([]string{d}, dirs...)
+	}
+	var b strings.Builder
+	for _, d := range dirs {
+		if e.MemoryLoaded[d] {
+			continue
+		}
+		e.MemoryLoaded[d] = true
+		data, err := os.ReadFile(filepath.Join(e.Jail.Root, d, MemoryFile))
+		if err != nil || len(data) == 0 {
+			continue
+		}
+		if e.MemoryBudget <= 0 {
+			break
+		}
+		if len(data) > e.MemoryBudget {
+			data = data[:e.MemoryBudget]
+		}
+		if e.spill("memory "+d+"/"+MemoryFile, string(data)) {
+			continue
+		}
+		e.MemoryBudget -= len(data)
+		sum := sha256.Sum256(data)
+		e.emit("memory_loaded", map[string]any{"path": d + "/" + MemoryFile, "sha256": hex.EncodeToString(sum[:]), "bytes": len(data)})
+		fmt.Fprintf(&b, "[Conventions from %s/%s]\n%s\n[end of conventions]\n\n", d, MemoryFile, strings.TrimSpace(string(data)))
+	}
+	return b.String()
 }
 
 func (e *Env) emit(kind string, data any) {

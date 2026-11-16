@@ -74,6 +74,13 @@ type Secrets struct {
 	Allow []string `json:"allow"`
 }
 
+// Hooks are site checks run in the sandbox. They live only in this
+// root-owned policy, never in the repository the model can edit.
+type Hooks struct {
+	PostEdit    []string `json:"post_edit"`
+	PreProposal []string `json:"pre_proposal"`
+}
+
 type Audit struct {
 	RequireAppendOnly bool `json:"require_append_only"`
 }
@@ -98,10 +105,15 @@ type Policy struct {
 	// SpillageGuard withholds content marked above Classification from
 	// the model and blocks proposals that contain it. Default true; it
 	// cannot be turned off in strict mode.
-	SpillageGuard *bool   `json:"spillage_guard,omitempty"`
-	Sandbox       Sandbox `json:"sandbox"`
-	Trust         Trust   `json:"trust"`
-	Audit         Audit   `json:"audit"`
+	SpillageGuard *bool `json:"spillage_guard,omitempty"`
+	Hooks         Hooks `json:"hooks"`
+	// SiteInstructions is a root-owned file of site-wide conventions loaded
+	// into every task prompt, before the repository's GOVCODE.md.
+	SiteInstructions    string  `json:"site_instructions,omitempty"`
+	RequirePlanApproval bool    `json:"require_plan_approval,omitempty"`
+	Sandbox             Sandbox `json:"sandbox"`
+	Trust               Trust   `json:"trust"`
+	Audit               Audit   `json:"audit"`
 
 	Path string `json:"-"`
 }

@@ -224,6 +224,9 @@ func (t *readFile) Run(_ context.Context, a map[string]any) (string, error) {
 	if crlf {
 		note += " (CRLF line endings; preserved automatically on edit)"
 	}
+	if mem := t.e.memoryFor(filepath.Dir(t.e.Jail.Rel(abs))); mem != "" {
+		b.WriteString(mem)
+	}
 	fmt.Fprintf(&b, "%s: lines %d-%d of %d%s\n", t.e.Jail.Rel(abs), off, end, len(lines), note)
 	w := len(fmt.Sprint(end))
 	for i := off - 1; i < end; i++ {

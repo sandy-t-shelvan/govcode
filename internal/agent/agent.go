@@ -30,11 +30,30 @@ type Config struct {
 	MaxNoCallNags int // consecutive replies without a tool call before giving up
 	Out           io.Writer
 	Verbose       bool
+	// PlanMode starts read-only: only exploration tools and propose_plan
+	// are offered until PlanReviewer approves a plan.
+	PlanMode bool
 }
+
+// PlanReviewer is the human who approves the plan in plan mode.
+type PlanReviewer interface {
+	ReviewPlan(steps []string, summary string) (approved bool, feedback string)
+}
+
+// ReadOnlyTools are the tools offered while planning.
+var ReadOnlyTools = map[string]bool{"list_files": true, "search": true, "read_file": true, "outline": true, "update_plan": true}
+
+var proposePlanSpec = llm.ToolSpec{Name: "propose_plan",
+	Description: "Submit your plan for human approval. Edit, test and command tools become available only after the plan is approved.",
+	Properties: map[string]llm.Property{
+		"steps":   {Type: "array", Description: "Short imperative steps", Items: &llm.Property{Type: "string"}},
+		"summary": {Type: "string", Description: "What you will change and why, in one or two sentences"},
+	}, Required: []string{"steps", "summary"}}
 
 // Metrics are what the Phase 1 tool-call eval measures.
 type Metrics struct {
 	Turns            int            `json:"turns"`
+	PlanRevisions    int            `json:"plan_revisions,omitempty"`
 	CallsEmitted     int            `json:"calls_emitted"`
 	ParsedBy         map[string]int `json:"parsed_by"`
 	UnknownTool      int            `json:"unknown_tool"`
@@ -60,10 +79,11 @@ func (m Metrics) ValidCallRate() float64 {
 }
 
 type Agent struct {
-	Backend llm.Backend
-	Tools   *tools.Set
-	Rec     Recorder
-	Cfg     Config
+	Backend      llm.Backend
+	Tools        *tools.Set
+	Rec          Recorder
+	Cfg          Config
+	PlanReviewer PlanReviewer
 }
 
 type Result struct {
@@ -88,15 +108,35 @@ func (a *Agent) Run(ctx context.Context, task string, rc RepoContext) (*Result, 
 	if a.Cfg.MaxNoCallNags == 0 {
 		a.Cfg.MaxNoCallNags = 3
 	}
-	specs := a.Tools.Specs()
-	specByName := map[string]llm.ToolSpec{}
-	for _, s := range specs {
-		specByName[s.Name] = s
+	planning := a.Cfg.PlanMode
+	if planning && a.PlanReviewer == nil {
+		return nil, fmt.Errorf("plan mode needs a human plan reviewer")
 	}
+	allSpecs := a.Tools.Specs()
+	specsFor := func(planning bool) ([]llm.ToolSpec, map[string]llm.ToolSpec) {
+		var out []llm.ToolSpec
+		for _, s := range allSpecs {
+			if !planning || ReadOnlyTools[s.Name] {
+				out = append(out, s)
+			}
+		}
+		if planning {
+			out = append(out, proposePlanSpec)
+		}
+		by := map[string]llm.ToolSpec{}
+		for _, s := range out {
+			by[s.Name] = s
+		}
+		return out, by
+	}
+	specs, specByName := specsFor(planning)
 	opts := a.Backend.Options()
 	msgs := []llm.Message{
 		{Role: llm.RoleSystem, Content: systemPrompt},
 		{Role: llm.RoleUser, Content: taskPrompt(task, rc)},
+	}
+	if planning {
+		msgs[1].Content += "\nPLAN MODE: you can only read code. Explore, then call propose_plan. Edit tools unlock after a human approves your plan.\n"
 	}
 	m := Metrics{ParsedBy: map[string]int{}}
 	nags := 0
@@ -163,6 +203,24 @@ func (a *Agent) Run(ctx context.Context, task string, rc RepoContext) (*Result, 
 			}
 			m.CallsEmitted++
 			m.ParsedBy[c.Source]++
+			if c.Name == proposePlanSpec.Name {
+				out, approved := a.reviewPlan(c, planning, &m, msgs)
+				results = append(results, llm.Message{Role: llm.RoleTool, Content: out, ToolCallID: c.ID, ToolName: c.Name})
+				if approved {
+					planning = false
+					specs, specByName = specsFor(false)
+				}
+				continue
+			}
+			if planning && !ReadOnlyTools[c.Name] {
+				if _, known := a.Tools.Get(c.Name); known {
+					m.ExecError++
+					msg := fmt.Sprintf("Error: %s is not available until your plan is approved. Call propose_plan first.", c.Name)
+					a.Rec.Record("tool_result", map[string]any{"call_id": c.ID, "tool": c.Name, "error": msg})
+					results = append(results, llm.Message{Role: llm.RoleTool, Content: msg, ToolCallID: c.ID, ToolName: c.Name})
+					continue
+				}
+			}
 			out, ok := a.execute(ctx, c, specByName, &m)
 			results = append(results, llm.Message{Role: llm.RoleTool, Content: out, ToolCallID: c.ID, ToolName: c.Name})
 			_ = ok
@@ -187,6 +245,46 @@ func (a *Agent) Run(ctx context.Context, task string, rc RepoContext) (*Result, 
 		changed = append(changed, p)
 	}
 	return &Result{Summary: env.Summary, Metrics: m, Changed: changed}, nil
+}
+
+// reviewPlan asks the human to approve the proposed plan. On approval the
+// plan is pinned into the task message, which context trimming never drops.
+func (a *Agent) reviewPlan(c *llm.ToolCall, planning bool, m *Metrics, msgs []llm.Message) (string, bool) {
+	if !planning {
+		return "The plan is already approved. Continue with the work.", false
+	}
+	args, err := llm.ValidateArgs(proposePlanSpec, c.Args)
+	if err != nil {
+		m.SchemaInvalid++
+		return "Error: " + err.Error(), false
+	}
+	m.ExecOK++
+	var steps []string
+	for _, s := range args["steps"].([]any) {
+		steps = append(steps, fmt.Sprint(s))
+	}
+	summary := fmt.Sprint(args["summary"])
+	if a.Tools.Env.Spill("proposed plan", strings.Join(steps, "\n")+"\n"+summary) {
+		return "Error: the plan contains a classification marking above this repository's level and was not shown to the reviewer. Rewrite it without that content.", false
+	}
+	a.Rec.Record("plan_proposed", map[string]any{"call_id": c.ID, "steps": steps, "summary": summary})
+	ok, feedback := a.PlanReviewer.ReviewPlan(steps, summary)
+	a.Rec.Record("plan_decision", map[string]any{"call_id": c.ID, "decision": map[bool]string{true: "approved", false: "rejected"}[ok], "feedback": feedback})
+	if !ok {
+		m.PlanRevisions++
+		return fmt.Sprintf("The reviewer rejected the plan: %s\nRevise it and call propose_plan again.", feedback), false
+	}
+	a.Tools.Env.Plan = steps
+	var b strings.Builder
+	b.WriteString("\nAPPROVED PLAN (follow it; do not expand the scope):\n")
+	for i, s := range steps {
+		fmt.Fprintf(&b, "%d. %s\n", i+1, s)
+	}
+	if feedback != "" {
+		b.WriteString("Reviewer notes: " + feedback + "\n")
+	}
+	msgs[1].Content += b.String()
+	return "Plan approved. Edit, test and command tools are now available. Carry out the plan.", true
 }
 
 func (a *Agent) execute(ctx context.Context, c *llm.ToolCall, specs map[string]llm.ToolSpec, m *Metrics) (string, bool) {

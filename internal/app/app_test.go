@@ -119,3 +119,59 @@ func TestRunRefusesOverClassifiedTask(t *testing.T) {
 		t.Fatal("proposal created for refused task")
 	}
 }
+
+func TestPreProposalHookBlocks(t *testing.T) {
+	a := world(t)
+	a.Policy.Hooks.PreProposal = []string{"! grep -q 'port = 9' cfg.c"}
+	p, err := a.Run(context.Background(), RunOptions{Task: "set port 9", Backend: edit("int port = 9;")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Status != proposal.StatusBlocked || len(p.Blocked) != 1 || !strings.Contains(p.Blocked[0], "site check failed") {
+		t.Fatalf("proposal %+v", p)
+	}
+}
+
+func TestMemoryInPromptAndAudited(t *testing.T) {
+	a := world(t)
+	os.WriteFile(filepath.Join(a.Repo.Root, "GOVCODE.md"), []byte("All ports are odd numbers."), 0o644)
+	exec.Command("git", "-C", a.Repo.Root, "add", "GOVCODE.md").Run()
+	exec.Command("git", "-C", a.Repo.Root, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "mem").Run()
+	m := edit("int port = 3;")
+	if _, err := a.Run(context.Background(), RunOptions{Task: "set port", Backend: m}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(m.Seen[0][1].Content, "All ports are odd numbers.") {
+		t.Fatalf("GOVCODE.md not in task prompt: %q", m.Seen[0][1].Content)
+	}
+	found := false
+	a.Log.Each(func(e *audit.Entry, _ []byte) error {
+		if e.Kind == "memory_loaded" {
+			found = true
+		}
+		return nil
+	})
+	if !found {
+		t.Fatal("memory load not audited")
+	}
+}
+
+type autoPlan struct{ n int }
+
+func (r *autoPlan) ReviewPlan([]string, string) (bool, string) { r.n++; return true, "" }
+
+func TestPolicyCanRequirePlanMode(t *testing.T) {
+	a := world(t)
+	a.Policy.RequirePlanApproval = true
+	if _, err := a.Run(context.Background(), RunOptions{Task: "x", Backend: edit("x")}); err == nil {
+		t.Fatal("required plan mode ran without a reviewer")
+	}
+	plan, _ := json.Marshal(map[string]any{"steps": []string{"set port"}, "summary": "s"})
+	m := edit("int port = 5;")
+	m.Responses = append([]llm.Response{{ToolCalls: []llm.ToolCall{{Name: "propose_plan", Args: plan, Source: llm.SourceNative}}}}, m.Responses...)
+	rv := &autoPlan{}
+	p, err := a.Run(context.Background(), RunOptions{Task: "set port", Backend: m, PlanReviewer: rv})
+	if err != nil || rv.n != 1 || p.Status != proposal.StatusReady {
+		t.Fatalf("err=%v reviews=%d proposal=%+v", err, rv.n, p)
+	}
+}

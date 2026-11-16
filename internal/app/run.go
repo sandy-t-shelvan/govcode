@@ -21,10 +21,13 @@ import (
 )
 
 type RunOptions struct {
-	Task        string
-	Interactive bool
-	Verbose     bool
-	Backend     llm.Backend // override (tests / eval)
+	Task         string
+	Interactive  bool
+	Verbose      bool
+	Plan         bool               // plan mode (forced by policy.require_plan_approval)
+	Backend      llm.Backend        // override (tests / eval)
+	PlanReviewer agent.PlanReviewer // override; default asks on the terminal
+	Approver     tools.Approver     // override; default asks on the terminal
 }
 
 // Run executes one task and produces a proposal. It never touches the
@@ -33,6 +36,10 @@ func (a *App) Run(ctx context.Context, o RunOptions) (*proposal.Proposal, error)
 	p := a.Policy
 	if !p.MayPropose(a.User.Username) {
 		return nil, fmt.Errorf("%s is not permitted to propose changes in this repository", a.User.Username)
+	}
+	planMode := o.Plan || p.RequirePlanApproval
+	if planMode && !o.Interactive && o.PlanReviewer == nil {
+		return nil, fmt.Errorf("plan mode needs a human reviewer; run interactively")
 	}
 	backend := o.Backend
 	if backend == nil {
@@ -97,16 +104,31 @@ func (a *App) Run(ctx context.Context, o RunOptions) (*proposal.Proposal, error)
 		close(done)
 	}()
 	env := &tools.Env{Jail: jail, Runner: runner, TestCommand: p.Tests.Command, TestTimeout: p.TestTimeout(),
-		Perms: rules, MaxLevel: maxLevel, RequireTest: p.Tests.RequirePass, Events: events}
-	if o.Interactive && p.Commands.PromptForOthers {
+		Perms: rules, MaxLevel: maxLevel, RequireTest: p.Tests.RequirePass, Events: events,
+		PostEditHooks: p.Hooks.PostEdit, MemoryBudget: backend.Options().NumCtx * 3 / 8}
+	switch {
+	case o.Approver != nil:
+		env.Approver = o.Approver
+	case o.Interactive && p.Commands.PromptForOthers:
 		env.Approver = &TTYApprover{User: a.User, Rec: sess}
 	}
+	memory := a.loadMemory(wt, env, sess)
 	fmt.Fprintf(a.Out, "govcode %s | %s | proposal %s\nmodel %s, num_ctx=%d, sandbox=%v\n",
 		p.Classification, a.User, id, modelID, backend.Options().NumCtx, runner.Sandboxed())
 	ag := &agent.Agent{Backend: backend, Tools: tools.NewSet(env), Rec: sess,
-		Cfg: agent.Config{MaxTurns: p.MaxTurns, Out: a.Out, Verbose: o.Verbose}}
+		Cfg: agent.Config{MaxTurns: p.MaxTurns, Out: a.Out, Verbose: o.Verbose, PlanMode: planMode}}
+	if planMode {
+		ag.PlanReviewer = o.PlanReviewer
+		if ag.PlanReviewer == nil {
+			ag.PlanReviewer = &TTYPlanReviewer{}
+		}
+	}
 	start := time.Now()
-	res, runErr := ag.Run(ctx, o.Task, agent.RepoContext{Summary: gitx.Summary(wt), TestCommand: p.Tests.Command})
+	res, runErr := ag.Run(ctx, o.Task, agent.RepoContext{Summary: gitx.Summary(wt), TestCommand: p.Tests.Command, Memory: memory})
+	var hookReport string
+	if res != nil && len(res.Changed) > 0 && len(p.Hooks.PreProposal) > 0 {
+		hookReport = env.RunHooks(ctx, "pre_proposal", p.Hooks.PreProposal, res.Changed)
+	}
 	close(events)
 	<-done
 	if sess.Err != nil {
@@ -156,6 +178,13 @@ func (a *App) Run(ctx context.Context, o RunOptions) (*proposal.Proposal, error)
 		blocked = append(blocked, fmt.Sprintf("secret: %s at %s:%d", f.Kind, f.File, f.Line))
 		sess.Record("secret_found", map[string]any{"proposal": id, "file": f.File, "line": f.Line, "kind": f.Kind})
 	}
+	if hookReport != "" {
+		for _, h := range p.Hooks.PreProposal {
+			if strings.Contains(hookReport, fmt.Sprintf("%q failed", h)) {
+				blocked = append(blocked, fmt.Sprintf("site check failed: %s", h))
+			}
+		}
+	}
 	if len(blocked) > 0 {
 		status = proposal.StatusBlocked
 	}
@@ -171,6 +200,37 @@ func (a *App) Run(ctx context.Context, o RunOptions) (*proposal.Proposal, error)
 	sess.Record("proposal", map[string]any{"proposal": id, "status": status, "base": base, "head": head, "branch": branch,
 		"diff_sha256": prop.DiffSHA256, "diff_object": diffObj, "files": strings.Join(files, ",")})
 	return prop, runErr
+}
+
+// loadMemory reads the site instructions (root-owned, from policy) and
+// the repository's root GOVCODE.md, records their hashes, and marks the
+// root as loaded so read_file only adds subdirectory files.
+func (a *App) loadMemory(wt string, env *tools.Env, sess interface {
+	Record(string, any) error
+}) string {
+	var b strings.Builder
+	add := func(label, path string) {
+		data, err := os.ReadFile(path)
+		if err != nil || len(data) == 0 {
+			return
+		}
+		if len(data) > env.MemoryBudget {
+			data = data[:max(env.MemoryBudget, 0)]
+		}
+		if env.Spill("memory "+label, string(data)) || len(data) == 0 {
+			return
+		}
+		env.MemoryBudget -= len(data)
+		sum := sha256.Sum256(data)
+		sess.Record("memory_loaded", map[string]any{"path": label, "sha256": hex.EncodeToString(sum[:]), "bytes": len(data)})
+		fmt.Fprintf(&b, "[%s]\n%s\n\n", label, strings.TrimSpace(string(data)))
+	}
+	if a.Policy.SiteInstructions != "" {
+		add("site instructions", a.Policy.SiteInstructions)
+	}
+	add(tools.MemoryFile, filepath.Join(wt, tools.MemoryFile))
+	env.MemoryLoaded = map[string]bool{".": true}
+	return b.String()
 }
 
 // addedLines returns only the "+" lines of a unified diff, so the guard
