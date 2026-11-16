@@ -94,6 +94,7 @@ For a classified deployment (strict mode, two-person rule, root-owned policy and
 | `govcode sbom`, `aibom`, `manifest`, `sign` | release engineer | Supply-chain artifacts. |
 | `govcode model verify \| smoke` | admin | Checks staged weights against the lock; tests one tool call against the server. |
 | `govcode eval` | evaluator | Measures tool calls and task success on the 10 legacy tasks. |
+| `govcode serve --stdio` | VS Code extension | JSON-RPC over stdin/stdout for the editor UI; no sockets. |
 
 ## Documentation
 
@@ -101,6 +102,7 @@ For a classified deployment (strict mode, two-person rule, root-owned policy and
 - [docs/SECURITY.md](docs/SECURITY.md): how each requirement is enforced, the threat model, and known limitations
 - [docs/SUPPLY_CHAIN.md](docs/SUPPLY_CHAIN.md): what the security reviewer checks, model staging, SBOM and AI-BOM, FIPS
 - [docs/EVAL.md](docs/EVAL.md): measuring tool-call reliability on your hardware
+- [docs/VSCODE.md](docs/VSCODE.md): the VS Code extension (offline VSIX)
 - [docs/ROADMAP.md](docs/ROADMAP.md): phase and ticket plan (mirrors Jira)
 - [CONTRIBUTING.md](CONTRIBUTING.md): branch, PR, CI gates and merge rules
 

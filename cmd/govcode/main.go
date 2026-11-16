@@ -506,7 +506,13 @@ func cmdSBOM(args []string) error {
 	fs := flag.NewFlagSet("sbom", flag.ExitOnError)
 	lock := fs.String("lock", "", "include models from this lock")
 	out := fs.String("o", "-", "output file")
+	vsix := fs.String("vsix", "", "include the VS Code extension package")
 	fs.Parse(args)
+	var extras []supply.Extra
+	if *vsix != "" {
+		extras = append(extras, supply.Extra{Name: "govcode-vscode", Type: "application", Path: *vsix,
+			Description: "VS Code extension (plain JavaScript, zero npm dependencies); UI over govcode serve --stdio"})
+	}
 	var l *modelpin.Lock
 	if *lock != "" {
 		var err error
@@ -514,7 +520,7 @@ func cmdSBOM(args []string) error {
 			return err
 		}
 	}
-	b, err := supply.SBOM(l)
+	b, err := supply.SBOM(l, extras...)
 	if err != nil {
 		return err
 	}
@@ -579,6 +585,8 @@ func cmdManifest(args []string) error {
 		switch {
 		case strings.HasPrefix(rel, "bin/"):
 			role = "binary"
+		case strings.HasSuffix(rel, ".vsix"):
+			role = "vscode-extension"
 		case strings.HasSuffix(rel, ".cdx.json"):
 			role = "sbom"
 		case strings.HasSuffix(rel, ".sig"):

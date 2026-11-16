@@ -1,0 +1,13 @@
+body { font-family: var(--vscode-font-family); color: var(--vscode-foreground); background: var(--vscode-editor-background); margin: 0; display: flex; flex-direction: column; height: 100vh; }
+.banner { text-align: center; font-weight: bold; padding: 2px 0; letter-spacing: 0.05em; }
+#log { flex: 1; overflow-y: auto; padding: 8px; font-family: var(--vscode-editor-font-family); font-size: var(--vscode-editor-font-size); white-space: pre-wrap; }
+.entry { margin: 2px 0; }
+.entry.user { font-weight: bold; }
+.entry.tool { color: var(--vscode-descriptionForeground); }
+.entry.err { color: var(--vscode-errorForeground); }
+.entry.ok { color: var(--vscode-testing-iconPassed); }
+.entry.warn { color: var(--vscode-editorWarning-foreground); font-weight: bold; }
+form { padding: 8px; border-top: 1px solid var(--vscode-panel-border); }
+textarea { width: 100%; box-sizing: border-box; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border); }
+.row { display: flex; gap: 8px; align-items: center; margin-top: 4px; }
+button { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; padding: 4px 12px; }

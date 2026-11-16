@@ -229,3 +229,19 @@ func FuzzServeInput(f *testing.F) {
 		}
 	})
 }
+
+// Closing the editor sends SIGTERM; the server must stop even while it is
+// blocked waiting for input.
+func TestServeStopsOnCancelWhileIdle(t *testing.T) {
+	inR, _ := io.Pipe() // never written, never closed
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- (&Server{PolicyPath: "/nonexistent"}).Serve(ctx, inR, io.Discard) }()
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Serve did not return after cancellation")
+	}
+}

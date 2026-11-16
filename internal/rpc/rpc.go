@@ -156,8 +156,35 @@ func (s *Server) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
 	}
 	var wg sync.WaitGroup
 	defer wg.Wait()
+	// Read in a goroutine so a cancelled context (SIGTERM from the editor
+	// closing) stops the server even while it is waiting for input.
+	type readResult struct {
+		line []byte
+		err  error
+	}
+	lines := make(chan readResult)
+	go func() {
+		for {
+			line, err := s.in.ReadBytes('\n')
+			select {
+			case lines <- readResult{line, err}:
+			case <-ctx.Done():
+				return
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
 	for {
-		line, err := s.in.ReadBytes('\n')
+		var rr readResult
+		select {
+		case <-ctx.Done():
+			s.cancelRun()
+			return nil
+		case rr = <-lines:
+		}
+		line, err := rr.line, rr.err
 		if len(line) > maxMessage {
 			s.send(message{Error: &rpcError{Code: codeInvalid, Message: "message too large"}})
 			continue
