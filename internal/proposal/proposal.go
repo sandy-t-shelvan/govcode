@@ -29,6 +29,7 @@ const (
 	StatusReady       = "ready"        // finished, tests passed
 	StatusTestsFailed = "tests_failed" // agent stopped with failing tests
 	StatusIncomplete  = "incomplete"   // agent did not finish
+	StatusBlocked     = "blocked"      // spillage or secret found; see Blocked
 	StatusApproved    = "approved"
 	StatusRejected    = "rejected"
 )
@@ -60,6 +61,7 @@ type Proposal struct {
 	Model          string        `json:"model"`
 	ModelDigest    string        `json:"model_digest,omitempty"`
 	Status         string        `json:"status"`
+	Blocked        []string      `json:"blocked,omitempty"` // reasons, location and kind only
 	AuditSession   string        `json:"audit_session"`
 	AuditTaskSeq   uint64        `json:"audit_task_seq"`
 	Metrics        any           `json:"metrics,omitempty"`

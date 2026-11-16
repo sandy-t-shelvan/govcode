@@ -26,6 +26,31 @@
 - Commits use `core.hooksPath=/dev/null` and `--no-verify`, so hooks the model wrote never run.
 - Only files edited through the edit tools go into the proposal. Build outputs and other side effects are listed in the audit log but not committed.
 
+### 2a. Permission rules (`permissions` in policy)
+- Rules such as `run_command(make *)`, `edit_file(src/**)` or `read_file(keys/**)`, in `allow`, `ask` and `deny` lists. Deny beats ask, and ask beats allow. With no matching rule, commands ask and other tools are allowed (the jail still applies).
+- Every file and command tool checks the rules itself, so no caller can skip them. Denied paths are also removed from `list_files` and `search` results. An allowed command containing shell metacharacters is downgraded to ask.
+- `ask` needs a human at the terminal or in the editor. With no human attached (`--non-interactive`, CI), ask becomes deny. Every decision is audit-logged with the rule that matched.
+
+### 2b. Spillage guard (classification above the repository's level)
+- The policy's `classification` sets the ceiling (for example `SECRET//NOFORN` means SECRET). The guard recognises banner markings (`TOP SECRET//SI`), banner lines, `Classification:` headers and portion marks at the start of a line (`(TS//SI) …`). It matches upper case only, so code such as `SECRET_KEY` or `if (S)` does not trigger.
+- Anything marked above the ceiling is stopped wherever it appears:
+
+  | Where | What happens |
+  |---|---|
+  | The task | Refused before a run starts |
+  | `read_file`, `outline` output | Whole output withheld from the model |
+  | `search` output | Matching lines withheld |
+  | Command and test output | Withheld |
+  | Model output | Not recorded verbatim |
+  | Edits and new files | Refused |
+  | Proposal's added lines | Proposal marked `blocked` |
+- Each event is audit-logged with location and level only, never the content. `spillage_guard` cannot be disabled in strict mode.
+- This is a technical backstop, not a replacement for your spillage procedure. Follow your ISSM's procedure when an event fires.
+
+### 2c. Secret scan
+- Before a proposal is saved, its added lines are scanned for private keys, cloud and Git tokens, JWTs, credentials in URLs, password assignments and high-entropy strings. Hex digests are ignored, because hashes are normal in code.
+- A finding marks the proposal `blocked` with file, line and kind. The value itself is never stored, logged or displayed. Known-safe lines can be allowed only by regex in the root-owned policy (`secrets.allow`).
+
 ### 3. Attribution and provenance (audit log)
 - Every model request and response, tool call and result, command and its output, test run, proposal, approval, rejection and landing is an entry.
 - Entry hash = SHA-256 over the canonical JSON of the entry, which includes `prev`, the previous entry's hash. The entry is signed with Ed25519 by the acting user's key. Large content goes to a content-addressed object store referenced by hash.

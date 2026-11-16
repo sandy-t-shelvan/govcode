@@ -6,7 +6,10 @@
   "target_branch": "main",
   "sensitive": true,
   "two_person_rule": true,
-  "approvers": ["jdoe", "asmith"],
+  "approvers": [
+    "jdoe",
+    "asmith"
+  ],
   "proposers": [],
   "allow_non_interactive_approval": false,
   "max_turns": 40,
@@ -20,18 +23,71 @@
     "temperature": 0.2,
     "verify_digest": true
   },
-  "tests": { "command": "make test", "timeout_seconds": 900, "require_pass": true },
+  "tests": {
+    "command": "make test",
+    "timeout_seconds": 900,
+    "require_pass": true
+  },
   "commands": {
-    "allowlist": ["make", "cmake --build", "gcc", "g++", "cc", "gnatmake", "gprbuild", "cobc", "gfortran"],
+    "allowlist": [
+      "make",
+      "cmake --build",
+      "gcc",
+      "g++",
+      "cc",
+      "gnatmake",
+      "gprbuild",
+      "cobc",
+      "gfortran"
+    ],
     "prompt_for_others": true
   },
-  "sandbox": { "mode": "required", "extra_ro_paths": ["/opt/gnat"], "env": [] },
+  "sandbox": {
+    "mode": "required",
+    "extra_ro_paths": [
+      "/opt/gnat"
+    ],
+    "env": []
+  },
   "trust": {
     "enforce": "strict",
-    "release_keys": ["/etc/govcode/trust/release.pub"],
+    "release_keys": [
+      "/etc/govcode/trust/release.pub"
+    ],
     "release_manifest": "/opt/govcode/manifest.json",
-    "model_keys": ["/etc/govcode/trust/models.pub"],
+    "model_keys": [
+      "/etc/govcode/trust/models.pub"
+    ],
     "keyring_dir": "/etc/govcode/keys"
   },
-  "audit": { "require_append_only": true }
+  "audit": {
+    "require_append_only": true
+  },
+  "permissions": {
+    "allow": [
+      "run_command(make *)",
+      "run_command(gprbuild *)",
+      "edit_file(src/**)",
+      "edit_file(test/**)"
+    ],
+    "ask": [
+      "edit_file(Makefile)",
+      "edit_file(**/*.gpr)",
+      "edit_file(build/**)",
+      "run_command(git *)"
+    ],
+    "deny": [
+      "read_file(keys/**)",
+      "read_file(**/*.pem)",
+      "edit_file(**/*.pem)",
+      "run_command(rm *)",
+      "run_command(curl *)",
+      "run_command(scp *)",
+      "run_command(ssh *)"
+    ]
+  },
+  "secrets": {
+    "allow": []
+  },
+  "spillage_guard": true
 }

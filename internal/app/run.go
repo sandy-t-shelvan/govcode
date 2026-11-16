@@ -14,7 +14,9 @@ import (
 	"github.com/sandy-t-shelvan/govcode/internal/agent"
 	"github.com/sandy-t-shelvan/govcode/internal/gitx"
 	"github.com/sandy-t-shelvan/govcode/internal/llm"
+	"github.com/sandy-t-shelvan/govcode/internal/marking"
 	"github.com/sandy-t-shelvan/govcode/internal/proposal"
+	"github.com/sandy-t-shelvan/govcode/internal/secrets"
 	"github.com/sandy-t-shelvan/govcode/internal/tools"
 )
 
@@ -45,6 +47,15 @@ func (a *App) Run(ctx context.Context, o RunOptions) (*proposal.Proposal, error)
 	}
 	id := proposal.NewID()
 	sess := a.Session(id)
+	maxLevel := p.MaxLevel()
+	if fs := marking.Above(o.Task, maxLevel); len(fs) > 0 && maxLevel != marking.Unknown {
+		sess.Record("spillage_blocked", map[string]any{"proposal": id, "where": "task", "level": marking.Highest(fs).String(), "repository_level": maxLevel.String()})
+		return nil, fmt.Errorf("task refused: it contains a %s marking, above this repository's %s accreditation. The event has been audit-logged; report it per your spillage procedure", marking.Highest(fs), maxLevel)
+	}
+	rules, err := p.Rules()
+	if err != nil {
+		return nil, err
+	}
 	branch := proposal.BranchFor(id)
 	wt := filepath.Join(p.StateDir, "worktrees", id)
 	if err := os.MkdirAll(filepath.Dir(wt), 0o2770); err != nil {
@@ -86,7 +97,7 @@ func (a *App) Run(ctx context.Context, o RunOptions) (*proposal.Proposal, error)
 		close(done)
 	}()
 	env := &tools.Env{Jail: jail, Runner: runner, TestCommand: p.Tests.Command, TestTimeout: p.TestTimeout(),
-		Allowlist: p.Commands.Allowlist, RequireTest: p.Tests.RequirePass, Events: events}
+		Perms: rules, MaxLevel: maxLevel, RequireTest: p.Tests.RequirePass, Events: events}
 	if o.Interactive && p.Commands.PromptForOthers {
 		env.Approver = &TTYApprover{User: a.User, Rec: sess}
 	}
@@ -134,11 +145,25 @@ func (a *App) Run(ctx context.Context, o RunOptions) (*proposal.Proposal, error)
 	if err != nil {
 		return nil, err
 	}
+	var blocked []string
+	if maxLevel != marking.Unknown {
+		if fs := marking.Above(addedLines(diff), maxLevel); len(fs) > 0 {
+			blocked = append(blocked, fmt.Sprintf("spillage: %d added line(s) marked %s, above repository level %s", len(fs), marking.Highest(fs), maxLevel))
+			sess.Record("spillage_blocked", map[string]any{"proposal": id, "where": "proposal diff", "lines": len(fs), "level": marking.Highest(fs).String()})
+		}
+	}
+	for _, f := range secrets.ScanDiff(diff, p.SecretAllow()) {
+		blocked = append(blocked, fmt.Sprintf("secret: %s at %s:%d", f.Kind, f.File, f.Line))
+		sess.Record("secret_found", map[string]any{"proposal": id, "file": f.File, "line": f.Line, "kind": f.Kind})
+	}
+	if len(blocked) > 0 {
+		status = proposal.StatusBlocked
+	}
 	prop := &proposal.Proposal{ID: id, Created: time.Now().UTC().Format(time.RFC3339), Classification: p.Classification,
 		Repo: a.Repo.Root, Task: o.Task, TaskSHA256: hex.EncodeToString(th[:]), Summary: res.Summary, Proposer: a.User,
 		Target: p.TargetBranch, Branch: branch, Base: base, Head: head, DiffSHA256: proposal.DiffHash(diff), Files: files,
 		Tests: proposal.Tests{Command: p.Tests.Command, Runs: env.TestRuns, Passed: env.LastTestPass},
-		Model: modelID, ModelDigest: digest, Status: status, AuditSession: id, AuditTaskSeq: taskEntry.Seq, Metrics: res.Metrics}
+		Model: modelID, ModelDigest: digest, Status: status, Blocked: blocked, AuditSession: id, AuditTaskSeq: taskEntry.Seq, Metrics: res.Metrics}
 	if err := a.Store.Save(prop, diff, a.Signer); err != nil {
 		return nil, err
 	}
@@ -146,6 +171,19 @@ func (a *App) Run(ctx context.Context, o RunOptions) (*proposal.Proposal, error)
 	sess.Record("proposal", map[string]any{"proposal": id, "status": status, "base": base, "head": head, "branch": branch,
 		"diff_sha256": prop.DiffSHA256, "diff_object": diffObj, "files": strings.Join(files, ",")})
 	return prop, runErr
+}
+
+// addedLines returns only the "+" lines of a unified diff, so the guard
+// judges what the proposal introduces, not what it removes.
+func addedLines(diff string) string {
+	var b strings.Builder
+	for _, l := range strings.Split(diff, "\n") {
+		if strings.HasPrefix(l, "+") && !strings.HasPrefix(l, "+++ ") {
+			b.WriteString(l[1:])
+			b.WriteByte('\n')
+		}
+	}
+	return b.String()
 }
 
 func errString(e error) string {

@@ -167,6 +167,9 @@ func cmdRun(ctx context.Context, args []string) error {
 	if p != nil {
 		fmt.Printf("\nProposal %s: %s\n  branch %s (%s..%s)\n  files: %s\n  tests: %s runs=%d passed=%v\n",
 			p.ID, p.Status, p.Branch, p.Base[:10], p.Head[:10], strings.Join(p.Files, ", "), p.Tests.Command, p.Tests.Runs, p.Tests.Passed)
+		for _, b := range p.Blocked {
+			fmt.Printf("  BLOCKED: %s\n", b)
+		}
 		if p.Status == proposal.StatusReady {
 			fmt.Printf("\nNothing has landed. A reviewer must run:\n  govcode review %s\n  govcode approve %s\n", p.ID, p.ID)
 		}
@@ -217,6 +220,9 @@ func cmdReview(args []string) error {
 	}
 	fmt.Printf("Proposal   %s  [%s]\nProposer   %s  (signature verified, key %s)\nTask       %s\nSummary    %s\nModel      %s\nTarget     %s  base %s  head %s\nTests      %s  runs=%d  passed=%v\n",
 		p.ID, p.Status, p.Proposer, p.ProposerKey, p.Task, p.Summary, p.Model, p.Target, p.Base[:12], p.Head[:12], p.Tests.Command, p.Tests.Runs, p.Tests.Passed)
+	for _, b := range p.Blocked {
+		fmt.Printf("BLOCKED    %s\n", b)
+	}
 	diff, verr := proposal.VerifyBranch(a.Repo, p)
 	if verr != nil {
 		fmt.Printf("INTEGRITY  FAILED: %v\n", verr)

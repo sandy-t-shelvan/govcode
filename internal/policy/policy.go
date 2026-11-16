@@ -11,11 +11,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/sandy-t-shelvan/govcode/internal/marking"
 	"github.com/sandy-t-shelvan/govcode/internal/netguard"
+	"github.com/sandy-t-shelvan/govcode/internal/permissions"
 )
 
 const Schema = "govcode.policy/v1"
@@ -57,28 +60,48 @@ type Trust struct {
 	KeyringDir      string   `json:"keyring_dir"`
 }
 
+// Permissions are allow/ask/deny rules, e.g. "run_command(make *)",
+// "edit_file(src/**)". Precedence deny > ask > allow (internal/permissions).
+type Permissions struct {
+	Allow []string `json:"allow"`
+	Ask   []string `json:"ask"`
+	Deny  []string `json:"deny"`
+}
+
+// Secrets configures the proposal secret scan. Allow holds regexps for
+// known-safe lines (test fixtures); it exists only here, never in the repo.
+type Secrets struct {
+	Allow []string `json:"allow"`
+}
+
 type Audit struct {
 	RequireAppendOnly bool `json:"require_append_only"`
 }
 
 type Policy struct {
-	Schema                      string   `json:"schema"`
-	Classification              string   `json:"classification"`
-	RepoRoot                    string   `json:"repo_root"`
-	StateDir                    string   `json:"state_dir"`
-	TargetBranch                string   `json:"target_branch"`
-	Sensitive                   bool     `json:"sensitive"`
-	TwoPersonRule               bool     `json:"two_person_rule"`
-	Approvers                   []string `json:"approvers"`
-	Proposers                   []string `json:"proposers"`
-	AllowNonInteractiveApproval bool     `json:"allow_non_interactive_approval"`
-	MaxTurns                    int      `json:"max_turns"`
-	Model                       Model    `json:"model"`
-	Tests                       Tests    `json:"tests"`
-	Commands                    Commands `json:"commands"`
-	Sandbox                     Sandbox  `json:"sandbox"`
-	Trust                       Trust    `json:"trust"`
-	Audit                       Audit    `json:"audit"`
+	Schema                      string      `json:"schema"`
+	Classification              string      `json:"classification"`
+	RepoRoot                    string      `json:"repo_root"`
+	StateDir                    string      `json:"state_dir"`
+	TargetBranch                string      `json:"target_branch"`
+	Sensitive                   bool        `json:"sensitive"`
+	TwoPersonRule               bool        `json:"two_person_rule"`
+	Approvers                   []string    `json:"approvers"`
+	Proposers                   []string    `json:"proposers"`
+	AllowNonInteractiveApproval bool        `json:"allow_non_interactive_approval"`
+	MaxTurns                    int         `json:"max_turns"`
+	Model                       Model       `json:"model"`
+	Tests                       Tests       `json:"tests"`
+	Commands                    Commands    `json:"commands"`
+	Permissions                 Permissions `json:"permissions"`
+	Secrets                     Secrets     `json:"secrets"`
+	// SpillageGuard withholds content marked above Classification from
+	// the model and blocks proposals that contain it. Default true; it
+	// cannot be turned off in strict mode.
+	SpillageGuard *bool   `json:"spillage_guard,omitempty"`
+	Sandbox       Sandbox `json:"sandbox"`
+	Trust         Trust   `json:"trust"`
+	Audit         Audit   `json:"audit"`
 
 	Path string `json:"-"`
 }
@@ -198,6 +221,26 @@ func (p *Policy) validate() ([]string, error) {
 			warn = append(warn, "audit.require_append_only is false; the log is tamper-evident but not tamper-resistant")
 		}
 	}
+	if p.SpillageGuard == nil {
+		t := true
+		p.SpillageGuard = &t
+	}
+	if !*p.SpillageGuard {
+		if p.Strict() {
+			return nil, fmt.Errorf("spillage_guard cannot be disabled with trust.enforce strict")
+		}
+		warn = append(warn, "spillage guard disabled")
+	} else if marking.ParseLevel(p.Classification) == marking.Unknown {
+		return nil, fmt.Errorf("classification %q does not start with a recognised level (UNCLASSIFIED, CONFIDENTIAL, SECRET, TOP SECRET)", p.Classification)
+	}
+	if _, err := p.Rules(); err != nil {
+		return nil, err
+	}
+	for _, a := range p.Secrets.Allow {
+		if _, err := regexp.Compile(a); err != nil {
+			return nil, fmt.Errorf("secrets.allow %q: %v", a, err)
+		}
+	}
 	if p.Trust.KeyringDir == "" {
 		p.Trust.KeyringDir = filepath.Join(p.StateDir, "keys")
 	}
@@ -229,6 +272,30 @@ func (p *Policy) checkFilePerms() (string, error) {
 }
 
 func (p *Policy) IsApprover(user string) bool { return contains(p.Approvers, user) }
+
+// Rules returns the permission rules, with the legacy commands.allowlist
+// folded in as allow rules.
+func (p *Policy) Rules() (*permissions.Rules, error) {
+	allow := append(permissions.FromAllowlist(p.Commands.Allowlist), p.Permissions.Allow...)
+	return permissions.Parse(allow, p.Permissions.Ask, p.Permissions.Deny)
+}
+
+// MaxLevel is the classification ceiling for the spillage guard.
+func (p *Policy) MaxLevel() marking.Level {
+	if p.SpillageGuard != nil && !*p.SpillageGuard {
+		return marking.Unknown
+	}
+	return marking.ParseLevel(p.Classification)
+}
+
+// SecretAllow compiles secrets.allow (validated at load).
+func (p *Policy) SecretAllow() []*regexp.Regexp {
+	var out []*regexp.Regexp
+	for _, a := range p.Secrets.Allow {
+		out = append(out, regexp.MustCompile(a))
+	}
+	return out
+}
 
 func (p *Policy) MayPropose(user string) bool {
 	return len(p.Proposers) == 0 || contains(p.Proposers, user)

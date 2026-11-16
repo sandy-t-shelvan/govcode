@@ -89,9 +89,15 @@ func (t *outline) Run(_ context.Context, a map[string]any) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if err := t.e.authorize("outline", t.e.Jail.Rel(abs)); err != nil {
+		return "", err
+	}
 	data, err := os.ReadFile(abs)
 	if err != nil {
 		return "", err
+	}
+	if t.e.spill("outline "+t.e.Jail.Rel(abs), string(data)) {
+		return withheld("file "+t.e.Jail.Rel(abs), t.e), nil
 	}
 	lang := langOf(abs)
 	if lang == "" {
