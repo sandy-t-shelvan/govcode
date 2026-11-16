@@ -6,7 +6,7 @@
 2. **Branch.** Create `feature/GOV-<n>-<short-name>` from the latest `main`. Never commit to `main` directly.
 3. **Build and test locally** before pushing:
    ```bash
-   gofmt -l . && go vet ./... && scripts/ci/coverage.sh 45 && scripts/ci/fuzz.sh 10
+   gofmt -l . && go vet ./... && scripts/ci/coverage.sh 52 && scripts/ci/fuzz.sh 10
    ```
 4. **Pull request** into `main` using the template: Jira key, security impact, test evidence, Definition of Done.
 5. **CI must be green.** Every job is required:

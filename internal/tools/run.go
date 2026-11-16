@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sandy-t-shelvan/govcode/internal/llm"
+	"github.com/sandy-t-shelvan/govcode/internal/permissions"
 )
 
 // ---- run_tests ----
@@ -28,6 +29,9 @@ func (t *runTests) Run(ctx context.Context, _ map[string]any) (string, error) {
 		to = 10 * time.Minute
 	}
 	r := t.e.Runner.Run(ctx, t.e.TestCommand, to)
+	if t.e.spill("run_tests output", r.Output) {
+		r.Output = withheld("test output", t.e)
+	}
 	t.e.TestRuns++
 	t.e.TestedGen = t.e.EditGen
 	t.e.LastTestPass = r.ExitCode == 0 && !r.TimedOut
@@ -55,25 +59,13 @@ func (t *runCommand) Spec() llm.ToolSpec {
 		}, Required: []string{"command"}}
 }
 
-// shellMeta are constructs that let a command chain or substitute another
-// command; an allowlisted prefix only auto-approves the simple case.
-var shellMeta = []string{";", "&&", "||", "|", "`", "$(", ">", "<", "\n", "&"}
+// shellMeta is kept for the fuzz test; the rules engine owns the list.
+var shellMeta = permissions.ShellMeta
 
+// allowlisted reports whether cmd would run without asking a human.
 func (e *Env) allowlisted(cmd string) bool {
-	// Check the raw string, not a trimmed copy: the decision must be about
-	// exactly the bytes that would run.
-	for _, m := range shellMeta {
-		if strings.Contains(cmd, m) {
-			return false
-		}
-	}
-	c := strings.TrimSpace(cmd)
-	for _, a := range e.Allowlist {
-		if c == a || strings.HasPrefix(c, a+" ") {
-			return true
-		}
-	}
-	return false
+	d, _ := e.rules().Decide("run_command", cmd)
+	return d == permissions.Allow
 }
 
 func (t *runCommand) Run(ctx context.Context, a map[string]any) (string, error) {
@@ -81,22 +73,15 @@ func (t *runCommand) Run(ctx context.Context, a map[string]any) (string, error) 
 	if cmd == "" {
 		return "", fmt.Errorf("command is empty")
 	}
-	how := "allowlist"
-	if !t.e.allowlisted(cmd) {
-		if t.e.Approver == nil {
-			t.e.emit("command_denied", map[string]any{"command": cmd, "reason": "not allowlisted, no approver"})
-			return "", fmt.Errorf("command not permitted by policy (not on allowlist): %s", cmd)
-		}
-		ok, who := t.e.Approver.ApproveCommand(cmd)
-		if !ok {
-			t.e.emit("command_denied", map[string]any{"command": cmd, "reason": "denied by " + who})
-			return "", fmt.Errorf("the human reviewer denied this command: %s. Try another approach", cmd)
-		}
-		how = "approved by " + who
+	if err := t.e.authorize("run_command", cmd); err != nil {
+		return "", err
 	}
 	to := time.Duration(min(max(integer(a, "timeout", 120), 1), 900)) * time.Second
 	r := t.e.Runner.Run(ctx, cmd, to)
-	t.e.emit("command", map[string]any{"result": r, "authorized": how})
+	if t.e.spill("run_command output", r.Output) {
+		r.Output = withheld("command output", t.e)
+	}
+	t.e.emit("command", map[string]any{"result": r})
 	suffix := ""
 	if r.TimedOut {
 		suffix = " (timed out)"

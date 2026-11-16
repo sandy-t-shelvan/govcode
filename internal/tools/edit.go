@@ -36,11 +36,17 @@ func (t *editFile) Run(_ context.Context, a map[string]any) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if err := t.e.authorize("edit_file", t.e.Jail.Rel(abs)); err != nil {
+		return "", err
+	}
 	data, err := os.ReadFile(abs)
 	if err != nil {
 		return "", fmt.Errorf("cannot read %s: %v (use create_file for new files)", rel, err)
 	}
 	oldT, newT := str(a, "old_text"), str(a, "new_text")
+	if t.e.spill("edit_file new_text for "+t.e.Jail.Rel(abs), newT) {
+		return "", fmt.Errorf("edit refused: new_text contains a classification marking above this repository's level (%s)", t.e.MaxLevel)
+	}
 	if oldT == "" {
 		return "", fmt.Errorf("old_text is empty; to add text, include an existing neighbouring line in old_text and new_text")
 	}
@@ -153,6 +159,12 @@ func (t *createFile) Run(_ context.Context, a map[string]any) (string, error) {
 	abs, err := t.e.Jail.Resolve(rel)
 	if err != nil {
 		return "", err
+	}
+	if err := t.e.authorize("create_file", t.e.Jail.Rel(abs)); err != nil {
+		return "", err
+	}
+	if t.e.spill("create_file content for "+t.e.Jail.Rel(abs), str(a, "content")) {
+		return "", fmt.Errorf("create refused: content contains a classification marking above this repository's level (%s)", t.e.MaxLevel)
 	}
 	if _, err := os.Stat(abs); err == nil && !boolean(a, "overwrite") {
 		return "", fmt.Errorf("%s already exists; use edit_file, or set overwrite=true", rel)

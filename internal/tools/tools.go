@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/sandy-t-shelvan/govcode/internal/llm"
+	"github.com/sandy-t-shelvan/govcode/internal/marking"
+	"github.com/sandy-t-shelvan/govcode/internal/permissions"
 )
 
 // Tool is one capability exposed to the model.
@@ -16,10 +18,11 @@ type Tool interface {
 	Run(ctx context.Context, args map[string]any) (string, error)
 }
 
-// CommandApprover decides whether a non-allowlisted command may run. In
-// interactive mode this prompts the human on the terminal.
-type CommandApprover interface {
-	ApproveCommand(command string) (bool, string)
+// Approver asks a human whether an action that policy marks "ask" may
+// proceed (for example a command outside the allowlist). In interactive
+// mode this prompts on the terminal or in the editor.
+type Approver interface {
+	Approve(action string) (ok bool, who string)
 }
 
 // Env is the shared state the tools operate on.
@@ -28,8 +31,14 @@ type Env struct {
 	Runner      *Runner
 	TestCommand string
 	TestTimeout time.Duration
-	Allowlist   []string // command prefixes that run without a prompt
-	Approver    CommandApprover
+	Allowlist   []string           // legacy command prefixes; folded into Perms
+	Perms       *permissions.Rules // allow/ask/deny rules; nil = built from Allowlist
+	Approver    Approver
+	// MaxLevel is the repository's accredited classification. Content
+	// marked above it is withheld from the model and blocks proposals.
+	// The zero value is UNCLASSIFIED, the strictest setting, so an
+	// unconfigured Env fails safe. marking.Unknown disables the guard.
+	MaxLevel    marking.Level
 	RequireTest bool // finish is refused until tests pass after the last edit
 
 	Plan         []string
@@ -47,6 +56,70 @@ type Env struct {
 type Event struct {
 	Kind string
 	Data any
+}
+
+func (e *Env) rules() *permissions.Rules {
+	if e.Perms == nil {
+		e.Perms, _ = permissions.Parse(permissions.FromAllowlist(e.Allowlist), nil, nil)
+	}
+	return e.Perms
+}
+
+// authorize applies the permission rules to one action. It is called by
+// every tool that acts on a path or runs a command, so no caller can skip it.
+func (e *Env) authorize(tool, subject string) error {
+	d, rule := e.rules().Decide(tool, subject)
+	who := "policy"
+	if d == permissions.Ask {
+		if e.Approver == nil {
+			d, rule = permissions.Deny, rule+" (ask, but no human approver is attached)"
+		} else if ok, by := e.Approver.Approve(fmt.Sprintf("%s(%s)", tool, subject)); ok {
+			d, who = permissions.Allow, by
+		} else {
+			d, who = permissions.Deny, by
+		}
+	}
+	e.emit("permission", map[string]any{"tool": tool, "subject": clip(subject, 300), "decision": d.String(), "rule": rule, "by": who})
+	if d == permissions.Deny {
+		if who != "policy" {
+			return fmt.Errorf("the human reviewer denied %s(%s). Try another approach", tool, subject)
+		}
+		return fmt.Errorf("%s(%s) is denied by policy rule %s", tool, subject, rule)
+	}
+	return nil
+}
+
+// spill reports whether text carries a marking above MaxLevel. If it does,
+// a spillage event is emitted with location and level only, never content.
+func (e *Env) spill(where, text string) bool {
+	if e.MaxLevel == marking.Unknown {
+		return false
+	}
+	fs := marking.Above(text, e.MaxLevel)
+	if len(fs) == 0 {
+		return false
+	}
+	lines := make([]int, 0, len(fs))
+	for _, f := range fs {
+		lines = append(lines, f.Line)
+	}
+	e.emit("spillage_blocked", map[string]any{"where": where, "lines": lines, "level": marking.Highest(fs).String(), "repository_level": e.MaxLevel.String()})
+	return true
+}
+
+// Spill is the exported check used by the agent on model output and by
+// the run flow on the task text.
+func (e *Env) Spill(where, text string) bool { return e.spill(where, text) }
+
+func withheld(where string, e *Env) string {
+	return fmt.Sprintf("[govcode: %s withheld: it contains a classification marking above this repository's level (%s). The event has been reported. Do not try to read it another way.]", where, e.MaxLevel)
+}
+
+func clip(s string, n int) string {
+	if len(s) > n {
+		return s[:n] + "…"
+	}
+	return s
 }
 
 func (e *Env) emit(kind string, data any) {

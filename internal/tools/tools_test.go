@@ -176,7 +176,7 @@ func TestFinishGate(t *testing.T) {
 
 type denyAll struct{ asked []string }
 
-func (d *denyAll) ApproveCommand(c string) (bool, string) {
+func (d *denyAll) Approve(c string) (bool, string) {
 	d.asked = append(d.asked, c)
 	return false, "tester"
 }

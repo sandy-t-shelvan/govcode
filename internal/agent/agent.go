@@ -130,7 +130,12 @@ func (a *Agent) Run(ctx context.Context, task string, rc RepoContext) (*Result, 
 			calls, content = llm.ExtractToolCalls(resp.Content, specs)
 		}
 		content = stripThinking(content)
-		a.Rec.Record("model_response", map[string]any{"turn": m.Turns, "content": resp.Content, "tool_calls": calls,
+		recorded := resp.Content
+		if env.Spill("model output", resp.Content) {
+			// Do not copy over-classified text into the log or history.
+			recorded, content = "[withheld: classification marking above repository level]", ""
+		}
+		a.Rec.Record("model_response", map[string]any{"turn": m.Turns, "content": recorded, "tool_calls": calls,
 			"usage": resp.Usage, "finish_reason": resp.FinishReason, "model": a.Backend.ModelName()})
 		if strings.TrimSpace(content) != "" {
 			a.logf("\n%s\n", strings.TrimSpace(content))
@@ -143,7 +148,7 @@ func (a *Agent) Run(ctx context.Context, task string, rc RepoContext) (*Result, 
 				m.StopReason = "no_tool_call"
 				break
 			}
-			msgs = append(msgs, llm.Message{Role: llm.RoleAssistant, Content: resp.Content},
+			msgs = append(msgs, llm.Message{Role: llm.RoleAssistant, Content: recorded},
 				llm.Message{Role: llm.RoleUser, Content: "You did not call a tool. Continue the task by calling a tool now. If the task is complete and tests pass, call finish."})
 			continue
 		}

@@ -264,17 +264,17 @@ type TTYApprover struct {
 	Rec  *audit.Session
 }
 
-func (t *TTYApprover) ApproveCommand(cmd string) (bool, string) {
+func (t *TTYApprover) Approve(cmd string) (bool, string) {
 	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
 	if err != nil {
 		return false, "no-terminal"
 	}
 	defer tty.Close()
-	fmt.Fprintf(tty, "\n  The model wants to run a command that is not on the policy allowlist:\n\n      %s\n\n  Allow it (sandboxed)? [y/N] ", cmd)
+	fmt.Fprintf(tty, "\n  Policy requires your approval for:\n\n      %s\n\n  Allow it? [y/N] ", cmd)
 	ans, _ := bufio.NewReader(tty).ReadString('\n')
 	ok := strings.EqualFold(strings.TrimSpace(ans), "y") || strings.EqualFold(strings.TrimSpace(ans), "yes")
 	if t.Rec != nil {
-		t.Rec.Record("command_decision", map[string]any{"command": cmd, "decision": map[bool]string{true: "allow", false: "deny"}[ok], "approver": t.User.Username})
+		t.Rec.Record("approval_prompt", map[string]any{"action": cmd, "decision": map[bool]string{true: "allow", false: "deny"}[ok], "approver": t.User.Username})
 	}
 	return ok, t.User.Username
 }

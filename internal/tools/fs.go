@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/sandy-t-shelvan/govcode/internal/llm"
+	"github.com/sandy-t-shelvan/govcode/internal/permissions"
 )
 
 const (
@@ -63,6 +63,9 @@ func (t *listFiles) Run(ctx context.Context, a map[string]any) (string, error) {
 		if pat != "" && !globMatch(pat, f) {
 			continue
 		}
+		if d, _ := t.e.rules().Decide("read_file", f); d == permissions.Deny {
+			continue // denied paths are not even listed
+		}
 		files = append(files, f)
 	}
 	if len(files) == 0 {
@@ -81,34 +84,7 @@ func (t *listFiles) Run(ctx context.Context, a map[string]any) (string, error) {
 
 // globMatch supports '**' (any depth) plus path.Match syntax. A pattern with
 // no '/' matches the base name at any depth (so '*.c' finds src/a.c).
-func globMatch(pattern, name string) bool {
-	if !strings.Contains(pattern, "/") {
-		ok, _ := path.Match(pattern, path.Base(name))
-		return ok
-	}
-	return matchSegs(strings.Split(pattern, "/"), strings.Split(name, "/"))
-}
-
-func matchSegs(ps, ns []string) bool {
-	for len(ps) > 0 {
-		if ps[0] == "**" {
-			for i := 0; i <= len(ns); i++ {
-				if matchSegs(ps[1:], ns[i:]) {
-					return true
-				}
-			}
-			return false
-		}
-		if len(ns) == 0 {
-			return false
-		}
-		if ok, _ := path.Match(ps[0], ns[0]); !ok {
-			return false
-		}
-		ps, ns = ps[1:], ns[1:]
-	}
-	return len(ns) == 0
-}
+func globMatch(pattern, name string) bool { return permissions.PathMatch(pattern, name) }
 
 // ---- search ----
 
@@ -162,7 +138,26 @@ func (t *search) Run(ctx context.Context, a map[string]any) (string, error) {
 		}
 		return "", fmt.Errorf("search failed: %v", err)
 	}
-	lines := strings.Split(strings.TrimRight(string(out), "\n"), "\n")
+	all := strings.Split(strings.TrimRight(string(out), "\n"), "\n")
+	var lines []string
+	hidden := 0
+	for _, l := range all {
+		file, rest, _ := strings.Cut(l, ":")
+		if d, _ := t.e.rules().Decide("read_file", file); d == permissions.Deny {
+			continue
+		}
+		if t.e.spill("search result in "+file, rest) {
+			hidden++
+			continue
+		}
+		lines = append(lines, l)
+	}
+	if hidden > 0 {
+		lines = append(lines, fmt.Sprintf("[govcode: %d matching line(s) withheld: classification marking above this repository's level]", hidden))
+	}
+	if len(lines) == 0 {
+		return "No matches.", nil
+	}
 	var b strings.Builder
 	for i, l := range lines {
 		if i == maxSearchResults {
@@ -196,9 +191,15 @@ func (t *readFile) Run(_ context.Context, a map[string]any) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if err := t.e.authorize("read_file", t.e.Jail.Rel(abs)); err != nil {
+		return "", err
+	}
 	data, err := os.ReadFile(abs)
 	if err != nil {
 		return "", fmt.Errorf("cannot read %s: %v", str(a, "path"), err)
+	}
+	if t.e.spill("read_file "+t.e.Jail.Rel(abs), string(data)) {
+		return withheld("file "+t.e.Jail.Rel(abs), t.e), nil
 	}
 	if bytes.IndexByte(data[:min(len(data), 8000)], 0) >= 0 {
 		return "", fmt.Errorf("%s is a binary file", str(a, "path"))
