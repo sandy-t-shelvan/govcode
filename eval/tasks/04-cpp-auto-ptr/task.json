@@ -1,0 +1,29 @@
+{
+  "id": "04-cpp-auto-ptr",
+  "language": "C++",
+  "title": "Port std::auto_ptr to C++17",
+  "prompt": "The toolchain is moving to C++17, where std::auto_ptr is removed; `make test` now fails (deprecated declarations are errors). Port SensorBus (sensor_bus.h and sensor_bus.cpp) from std::auto_ptr to std::unique_ptr, keeping the public interface and ownership semantics the same.",
+  "test_command": "make -s test",
+  "check_command": "make -s test",
+  "requires": [
+    "g++"
+  ],
+  "oracle": [
+    {
+      "tool": "edit_file",
+      "args": {
+        "path": "sensor_bus.h",
+        "old_text": "    std::auto_ptr<Sensor> slots_[kMax];",
+        "new_text": "    std::unique_ptr<Sensor> slots_[kMax];"
+      }
+    },
+    {
+      "tool": "edit_file",
+      "args": {
+        "path": "sensor_bus.cpp",
+        "old_text": "        std::auto_ptr<Sensor> p(s);\n        slots_[count_++] = p;",
+        "new_text": "        slots_[count_++].reset(s);"
+      }
+    }
+  ]
+}

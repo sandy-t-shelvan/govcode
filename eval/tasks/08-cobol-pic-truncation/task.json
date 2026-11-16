@@ -1,0 +1,21 @@
+{
+  "id": "08-cobol-pic-truncation",
+  "language": "COBOL",
+  "title": "Rate truncated by PIC clause",
+  "prompt": "INTCALC.cbl should compute interest at 5.25% (rate 0.0525) on 10000.00, i.e. 525.00, but it prints 500.00. Find why the rate loses precision and fix the data definition. Keep fixed-format columns (Area A at column 8, Area B at column 12).",
+  "test_command": "make -s test",
+  "check_command": "make -s test",
+  "requires": [
+    "cobc"
+  ],
+  "oracle": [
+    {
+      "tool": "edit_file",
+      "args": {
+        "path": "INTCALC.cbl",
+        "old_text": "       01  WS-RATE           PIC V99      VALUE ZERO.",
+        "new_text": "       01  WS-RATE           PIC V9999    VALUE ZERO."
+      }
+    }
+  ]
+}

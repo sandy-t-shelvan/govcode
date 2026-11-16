@@ -1,0 +1,66 @@
+# Qwen3-Coder-30B-A3B-Instruct, Q4_K_M, for govcode.
+# num_ctx is fixed here AND sent on every /api/chat request by govcode.
+# 32768 tokens of KV cache for this MoE model needs ~3 GB on top of ~18.6 GB weights.
+FROM ./qwen3-coder-30b-a3b-instruct-Q4_K_M.gguf
+
+PARAMETER num_ctx 32768
+PARAMETER num_predict 4096
+PARAMETER temperature 0.2
+PARAMETER top_p 0.8
+PARAMETER top_k 20
+PARAMETER repeat_penalty 1.05
+PARAMETER stop "<|im_end|>"
+PARAMETER stop "<|endoftext|>"
+
+# Qwen3-Coder native tool format (XML function/parameter blocks).
+TEMPLATE """{{- if or .System .Tools }}<|im_start|>system
+{{ if .System }}{{ .System }}{{ end }}
+{{- if .Tools }}
+
+# Tools
+
+You have access to the following functions:
+
+<tools>
+{{- range .Tools }}
+{{ .Function }}
+{{- end }}
+</tools>
+
+If you choose to call a function ONLY reply in the following format with NO suffix:
+
+<tool_call>
+<function=example_function_name>
+<parameter=example_parameter_1>
+value_1
+</parameter>
+</function>
+</tool_call>
+{{- end }}<|im_end|>
+{{ end }}
+{{- range $i, $_ := .Messages }}
+{{- $last := eq (len (slice $.Messages $i)) 1 -}}
+{{- if eq .Role "user" }}<|im_start|>user
+{{ .Content }}<|im_end|>
+{{ else if eq .Role "assistant" }}<|im_start|>assistant
+{{ if .Content }}{{ .Content }}{{ end }}
+{{- range .ToolCalls }}
+<tool_call>
+<function={{ .Function.Name }}>
+{{- range $k, $v := .Function.Arguments }}
+<parameter={{ $k }}>
+{{ $v }}
+</parameter>
+{{- end }}
+</function>
+</tool_call>
+{{- end }}{{ if not $last }}<|im_end|>
+{{ end }}
+{{- else if eq .Role "tool" }}<|im_start|>user
+<tool_response>
+{{ .Content }}
+</tool_response><|im_end|>
+{{ end }}
+{{- if and (ne .Role "assistant") $last }}<|im_start|>assistant
+{{ end }}
+{{- end }}"""

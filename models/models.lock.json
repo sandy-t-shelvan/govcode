@@ -1,0 +1,315 @@
+{
+  "schema": "govcode.models.lock/v1",
+  "comment": "Upstream hashes taken from the Hugging Face hub LFS metadata at the pinned revision. FILL_AT_STAGING values are computed by scripts/stage-models.sh on the low side and the whole file is then Ed25519-signed (models.lock.json.sig). govcode refuses to start if the signature or any hash does not verify.",
+  "models": [
+    {
+      "id": "qwen3-coder-30b-a3b",
+      "default": true,
+      "name": "Qwen3-Coder-30B-A3B-Instruct",
+      "license": "apache-2.0",
+      "publisher": "Qwen (Alibaba Cloud)",
+      "upstream": {
+        "repo": "Qwen/Qwen3-Coder-30B-A3B-Instruct",
+        "revision": "b2cff646eb4bb1d68355c01b18ae02e7cf42d120",
+        "files": [
+          {
+            "path": "LICENSE",
+            "size": 11343,
+            "git_blob_sha1": "6634c8cc3133b3848ec74b9f275acaaa1ea618ab",
+            "sha256": "FILL_AT_STAGING"
+          },
+          {
+            "path": "chat_template.jinja",
+            "size": 6211,
+            "git_blob_sha1": "49b0e8d0ee7e655434942233b4b0ab2104d5247e",
+            "sha256": "FILL_AT_STAGING"
+          },
+          {
+            "path": "config.json",
+            "size": 963,
+            "git_blob_sha1": "55a5a950a2926507ae506d5e6549b022bac27834",
+            "sha256": "FILL_AT_STAGING"
+          },
+          {
+            "path": "generation_config.json",
+            "size": 180,
+            "git_blob_sha1": "ba3e8d9206508daab666e1aaa9dcc9c435bfa541",
+            "sha256": "FILL_AT_STAGING"
+          },
+          {
+            "path": "merges.txt",
+            "size": 1671839,
+            "git_blob_sha1": "20024bfe7c83998e9aeaf98a0cd6a2ce6306c2f0",
+            "sha256": "FILL_AT_STAGING"
+          },
+          {
+            "path": "model-00001-of-00016.safetensors",
+            "size": 3998893112,
+            "sha256": "c8f4ee157c2bdb00521d0f422c08ef16f0f3f5f7e234786d829401d627d2e167"
+          },
+          {
+            "path": "model-00002-of-00016.safetensors",
+            "size": 3999974192,
+            "sha256": "8cf85f0e5a0ea8d8cd3fd1f411175d811ca735571210873fd42bb5eec0b35406"
+          },
+          {
+            "path": "model-00003-of-00016.safetensors",
+            "size": 3997360832,
+            "sha256": "4fa5cc233e965c8671d32a335045697fc4317c8d2939d8ca5fb9ef62d0233207"
+          },
+          {
+            "path": "model-00004-of-00016.safetensors",
+            "size": 3999975056,
+            "sha256": "c10ff15f08abea0ff60b2fc345dcc34191bc8049d05d3bece6b081a99cbfc4c8"
+          },
+          {
+            "path": "model-00005-of-00016.safetensors",
+            "size": 3999975400,
+            "sha256": "65d3701e2354a8cf6e5afa3f84520bf81effcdc29b0c481dbbeb089f80349100"
+          },
+          {
+            "path": "model-00006-of-00016.safetensors",
+            "size": 3999975400,
+            "sha256": "7c832bf9e527b7b6f3184b561de05f30981bdcfdffe9c69e69064cdaa97071b5"
+          },
+          {
+            "path": "model-00007-of-00016.safetensors",
+            "size": 3999975472,
+            "sha256": "71a710c3ff52e85d22ae3f5b10b9a4dd49821c9533460fb1d4bb21593f71b585"
+          },
+          {
+            "path": "model-00008-of-00016.safetensors",
+            "size": 3997362064,
+            "sha256": "cd2861625e1bd8a212151445072b9d826c9754fd4618f8b83c2857fc0854b778"
+          },
+          {
+            "path": "model-00009-of-00016.safetensors",
+            "size": 3999975408,
+            "sha256": "8335225fd61c0fe283a83463a8d9c5c19e211ea8048925b031a088f274eb9c4e"
+          },
+          {
+            "path": "model-00010-of-00016.safetensors",
+            "size": 3999975400,
+            "sha256": "421481c42e8d85891c9d88492d7530d6b6d8b15c23a6db6a9b7438e0b6161330"
+          },
+          {
+            "path": "model-00011-of-00016.safetensors",
+            "size": 3999975408,
+            "sha256": "d7dd447928ddec67a3ec06d5bc4fd99dde9ac5bdf0b6ab500faca5dfdfb963b4"
+          },
+          {
+            "path": "model-00012-of-00016.safetensors",
+            "size": 3987924896,
+            "sha256": "349a0b0247d244ffef34bc23b403ce756f515242323f024a5f8028c109a798af"
+          },
+          {
+            "path": "model-00013-of-00016.safetensors",
+            "size": 3999975088,
+            "sha256": "52e7f570649b27bc35b8cd27ac643d2158c02a5c76078c80a8afc449377b508e"
+          },
+          {
+            "path": "model-00014-of-00016.safetensors",
+            "size": 3999975400,
+            "sha256": "0b30aed1b55b3f25fbf2c5e81784438d0a08461c9518e26e11987eb10d80ebd7"
+          },
+          {
+            "path": "model-00015-of-00016.safetensors",
+            "size": 3999975400,
+            "sha256": "cb8b3b13c0519874ed0cbe6832ab57e51476e3821c83f0ffe4ec83a8d23fc5f4"
+          },
+          {
+            "path": "model-00016-of-00016.safetensors",
+            "size": 1085307128,
+            "sha256": "778479fa2b8b766ba1c7bfc56a71ed9b060081e0fbc5eb4edafd19a1d6b4c116"
+          },
+          {
+            "path": "model.safetensors.index.json",
+            "size": 1699758,
+            "git_blob_sha1": "52b3fc9153e5d0c39c1a89ef94ef10ab8d6cca98",
+            "sha256": "FILL_AT_STAGING"
+          },
+          {
+            "path": "qwen3coder_tool_parser.py",
+            "size": 31613,
+            "git_blob_sha1": "0960292aa3d83ff629f65be6c4bcb62632e6198d",
+            "sha256": "FILL_AT_STAGING"
+          },
+          {
+            "path": "tokenizer.json",
+            "size": 7032399,
+            "git_blob_sha1": "90c73275ae7b61cd2b6c4f263018057d516f0c95",
+            "sha256": "FILL_AT_STAGING"
+          },
+          {
+            "path": "tokenizer_config.json",
+            "size": 13055,
+            "git_blob_sha1": "cc8cf0649efea42a8c099d852b1525fcfc42c222",
+            "sha256": "FILL_AT_STAGING"
+          },
+          {
+            "path": "vocab.json",
+            "size": 2776833,
+            "git_blob_sha1": "4783fe10ac3adce15ac8f358ef5462739852c569",
+            "sha256": "FILL_AT_STAGING"
+          }
+        ]
+      },
+      "artifact": {
+        "format": "gguf",
+        "quantization": "Q4_K_M",
+        "produced_by": "llama.cpp convert_hf_to_gguf.py + llama-quantize (pinned in scripts/stage-models.sh)",
+        "files": [
+          {
+            "path": "qwen3-coder-30b-a3b-instruct-Q4_K_M.gguf",
+            "size": 0,
+            "sha256": "FILL_AT_STAGING"
+          }
+        ]
+      },
+      "reference_prequantized": {
+        "repo": "unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF",
+        "revision": "b17cb02dd882d5b6ab62fc777ad2995f19668350",
+        "note": "Third-party quantization. Use only if your ATO accepts it; self-quantizing from the first-party weights above is preferred.",
+        "files": [
+          {
+            "path": "Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf",
+            "size": 18556689568,
+            "sha256": "fadc3e5f8d42bf7e894a785b05082e47daee4df26680389817e2093056f088ad"
+          },
+          {
+            "path": "Qwen3-Coder-30B-A3B-Instruct-Q5_K_M.gguf",
+            "size": 21725584544,
+            "sha256": "4b78837bbec5ee248e4a5642bf608b6793721af41b92589e40c8da0bce58b907"
+          }
+        ]
+      },
+      "serve": {
+        "ollama_name": "govcode-qwen3-coder:30b-q4km",
+        "num_ctx": 32768,
+        "max_tokens": 4096,
+        "temperature": 0.2,
+        "vllm_tool_call_parser": "qwen3_coder",
+        "ollama_manifest_digest": "FILL_AT_STAGING"
+      }
+    },
+    {
+      "id": "devstral-small-24b",
+      "name": "Devstral-Small-2507",
+      "license": "apache-2.0",
+      "publisher": "Mistral AI",
+      "upstream": {
+        "repo": "mistralai/Devstral-Small-2507",
+        "revision": "bd165ab26cebbcc2eea2c4ecbfc07f3ac42b3c39",
+        "files": [
+          {
+            "path": "SYSTEM_PROMPT.txt",
+            "size": 5651,
+            "git_blob_sha1": "6a143344264d75407ea30b87444d85923e2602a0",
+            "sha256": "FILL_AT_STAGING"
+          },
+          {
+            "path": "config.json",
+            "size": 641,
+            "git_blob_sha1": "a7119b3a29f1a7cb9664b4b7ac3d4ce6223223d6",
+            "sha256": "FILL_AT_STAGING"
+          },
+          {
+            "path": "generation_config.json",
+            "size": 132,
+            "git_blob_sha1": "137e46fe67f113545d5cb42ee32539827cfbbe77",
+            "sha256": "FILL_AT_STAGING"
+          },
+          {
+            "path": "model-00001-of-00010.safetensors",
+            "size": 4781571736,
+            "sha256": "43f7a78bb630fb3f5ad9e679ffac422cb4c8be9177a45f4233195790e20413b8"
+          },
+          {
+            "path": "model-00002-of-00010.safetensors",
+            "size": 4781592784,
+            "sha256": "c303664647345cdc0731ae01f42d62f810c5a77d5c1c5a0f22ada962838397ad"
+          },
+          {
+            "path": "model-00003-of-00010.safetensors",
+            "size": 4781592800,
+            "sha256": "7386182831c269ea5e0eccb57b26bef401009be7ad365507d57a5925b1b77151"
+          },
+          {
+            "path": "model-00004-of-00010.safetensors",
+            "size": 4886471600,
+            "sha256": "dfc0a79a4696991dc1d90d08fdcf9b2128ac16a1fa42adb7cef5f701b058289b"
+          },
+          {
+            "path": "model-00005-of-00010.safetensors",
+            "size": 4781592824,
+            "sha256": "aff0ed987386e65b93d2deee6e26c628df9a38a26710846ccdd30deafe5bb61a"
+          },
+          {
+            "path": "model-00006-of-00010.safetensors",
+            "size": 4781592816,
+            "sha256": "1f4f0b1e5989747bff575a070cba9867750b8680b45ac4819d95095a8084d3ec"
+          },
+          {
+            "path": "model-00007-of-00010.safetensors",
+            "size": 4886471600,
+            "sha256": "028b18d10e8ba4383606308370570119dabdeb1adab4dadf789cd1e082d6bc9f"
+          },
+          {
+            "path": "model-00008-of-00010.safetensors",
+            "size": 4781592824,
+            "sha256": "865a94910b075066ec83ea4ec920c1d2c0cabcfbca97604872edea253d460aea"
+          },
+          {
+            "path": "model-00009-of-00010.safetensors",
+            "size": 4781592816,
+            "sha256": "a44a52d009b2c19755707560cc64de2cbabfec7876a804cc2d13ae169ae8cd84"
+          },
+          {
+            "path": "model-00010-of-00010.safetensors",
+            "size": 3900777072,
+            "sha256": "8437d281d1fb8c512d7f9b81069d3d4700fc0c1524a792308f16738538b043bc"
+          },
+          {
+            "path": "model.safetensors.index.json",
+            "size": 29931,
+            "git_blob_sha1": "84aee86aea019b2432687f08586a966d4d39aa24",
+            "sha256": "FILL_AT_STAGING"
+          },
+          {
+            "path": "params.json",
+            "size": 225,
+            "git_blob_sha1": "29fe2a5b08abd263a55d382c6f7d231e9926b1c9",
+            "sha256": "FILL_AT_STAGING"
+          },
+          {
+            "path": "tekken.json",
+            "size": 19399650,
+            "sha256": "839c48629ff570bd664586800aa3ee17ee628f56efc7fd8e145cc01467a1c188"
+          }
+        ]
+      },
+      "artifact": {
+        "format": "gguf",
+        "quantization": "Q4_K_M",
+        "produced_by": "first-party (mistralai/Devstral-Small-2507_gguf)",
+        "repo": "mistralai/Devstral-Small-2507_gguf",
+        "revision": "ee2f0c00c5c86862f471fbf533268cf01b80d4a6",
+        "files": [
+          {
+            "path": "Devstral-Small-2507-Q4_K_M.gguf",
+            "size": 14333915904,
+            "sha256": "1bcc2b1b7b7ea3168ba2dbe782432c464f2240598bd193930122c41b117c1796"
+          }
+        ]
+      },
+      "serve": {
+        "ollama_name": "govcode-devstral:24b-q4km",
+        "num_ctx": 32768,
+        "max_tokens": 4096,
+        "temperature": 0.15,
+        "vllm_tool_call_parser": "mistral",
+        "ollama_manifest_digest": "FILL_AT_STAGING"
+      }
+    }
+  ]
+}

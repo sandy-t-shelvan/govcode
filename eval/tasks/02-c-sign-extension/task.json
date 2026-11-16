@@ -1,0 +1,21 @@
+{
+  "id": "02-c-sign-extension",
+  "language": "C",
+  "title": "Checksum wrong for payload bytes >= 0x80",
+  "prompt": "frame_checksum() in frame.c gives the wrong checksum when payload bytes are 0x80 or above (field reports from the ground station). Per the comment, each byte must be added as an unsigned value 0..255. Fix the bug without changing the function signature. Add a test case for bytes 0xFF,0x80,0x01 (expected 0x0180) to test_02.c.",
+  "test_command": "make -s test",
+  "check_command": "make -s test",
+  "requires": [
+    "cc"
+  ],
+  "oracle": [
+    {
+      "tool": "edit_file",
+      "args": {
+        "path": "frame.c",
+        "old_text": "        sum += buf[i];",
+        "new_text": "        sum += (unsigned char)buf[i];"
+      }
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "id": "05-cpp-rule-of-three",
+  "language": "C++",
+  "title": "Shallow copy causes double free",
+  "prompt": "Copying a MsgBuf (msgbuf.h / msgbuf.cpp) causes a double free and copies share storage. Implement a deep-copying copy constructor and copy assignment operator (safe for self-assignment). Add a copy test to test_05.cpp.",
+  "test_command": "make -s test",
+  "check_command": "make -s test",
+  "requires": [
+    "g++"
+  ],
+  "oracle": [
+    {
+      "tool": "edit_file",
+      "args": {
+        "path": "msgbuf.h",
+        "old_text": "    ~MsgBuf();",
+        "new_text": "    ~MsgBuf();\n    MsgBuf(const MsgBuf& other);\n    MsgBuf& operator=(const MsgBuf& other);"
+      }
+    },
+    {
+      "tool": "edit_file",
+      "args": {
+        "path": "msgbuf.cpp",
+        "old_text": "MsgBuf::~MsgBuf()\n{\n    delete[] data_;\n}",
+        "new_text": "MsgBuf::~MsgBuf()\n{\n    delete[] data_;\n}\n\nMsgBuf::MsgBuf(const MsgBuf& other) : len_(other.len_), data_(new char[other.len_])\n{\n    std::memcpy(data_, other.data_, len_);\n}\n\nMsgBuf& MsgBuf::operator=(const MsgBuf& other)\n{\n    if (this != &other) {\n        char* p = new char[other.len_];\n        std::memcpy(p, other.data_, other.len_);\n        delete[] data_;\n        data_ = p;\n        len_ = other.len_;\n    }\n    return *this;\n}"
+      }
+    }
+  ]
+}

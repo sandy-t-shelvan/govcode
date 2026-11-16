@@ -1,0 +1,21 @@
+{
+  "id": "07-ada-missing-body",
+  "language": "Ada",
+  "title": "Implement procedure declared in spec",
+  "prompt": "The build fails because procedure Sensors.Clamp is declared in sensors.ads but has no body. Implement Clamp in sensors.adb according to the comment in the spec. Do not change the spec.",
+  "test_command": "make -s test",
+  "check_command": "make -s test",
+  "requires": [
+    "gnatmake"
+  ],
+  "oracle": [
+    {
+      "tool": "edit_file",
+      "args": {
+        "path": "sensors.adb",
+        "old_text": "package body Sensors is\n",
+        "new_text": "package body Sensors is\n\n   procedure Clamp (Value : in out Integer; Lo, Hi : Integer) is\n   begin\n      if Value < Lo then\n         Value := Lo;\n      elsif Value > Hi then\n         Value := Hi;\n      end if;\n   end Clamp;\n"
+      }
+    }
+  ]
+}

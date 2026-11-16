@@ -1,0 +1,54 @@
+{
+  "id": "10-c-rename-across-files",
+  "language": "C",
+  "title": "Rename a function across the codebase",
+  "prompt": "Coding standard CS-7 requires module-prefixed names. Rename the function getTemp to sensor_read_temp everywhere: its declaration in src/sensor.h, its definition, every call site in src/, and test_10.c. Behaviour must not change and the build must stay warning-free.",
+  "test_command": "make -s test",
+  "check_command": "make -s test",
+  "requires": [
+    "cc"
+  ],
+  "oracle": [
+    {
+      "tool": "edit_file",
+      "args": {
+        "path": "src/sensor.h",
+        "old_text": "int getTemp(int channel);",
+        "new_text": "int sensor_read_temp(int channel);"
+      }
+    },
+    {
+      "tool": "edit_file",
+      "args": {
+        "path": "src/sensor.c",
+        "old_text": "int getTemp(int channel)",
+        "new_text": "int sensor_read_temp(int channel)"
+      }
+    },
+    {
+      "tool": "edit_file",
+      "args": {
+        "path": "src/monitor.c",
+        "old_text": "getTemp(",
+        "new_text": "sensor_read_temp(",
+        "replace_all": true
+      }
+    },
+    {
+      "tool": "edit_file",
+      "args": {
+        "path": "src/log.c",
+        "old_text": "getTemp(channel)",
+        "new_text": "sensor_read_temp(channel)"
+      }
+    },
+    {
+      "tool": "edit_file",
+      "args": {
+        "path": "test_10.c",
+        "old_text": "getTemp(1)",
+        "new_text": "sensor_read_temp(1)"
+      }
+    }
+  ]
+}

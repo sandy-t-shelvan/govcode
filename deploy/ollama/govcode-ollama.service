@@ -1,0 +1,29 @@
+# systemd unit: Ollama pinned to loopback with no outbound features.
+# Install: /etc/systemd/system/ollama.service  (Ollama v0.40.16, commit d63b702609c4300a2ca07be2bdb0adb9834725e5)
+[Unit]
+Description=Ollama (govcode, air-gapped)
+After=network.target
+
+[Service]
+User=ollama
+Group=ollama
+ExecStart=/usr/local/bin/ollama serve
+Environment=OLLAMA_HOST=127.0.0.1:11434
+Environment=OLLAMA_ORIGINS=http://127.0.0.1
+Environment=OLLAMA_MODELS=/var/lib/ollama/models
+Environment=OLLAMA_NOPRUNE=1
+Environment=OLLAMA_KEEP_ALIVE=30m
+Environment=OLLAMA_CONTEXT_LENGTH=32768
+Environment=HTTPS_PROXY=
+Environment=HTTP_PROXY=
+# Defense in depth: the service may only talk to loopback.
+IPAddressDeny=any
+IPAddressAllow=localhost
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/ollama
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
