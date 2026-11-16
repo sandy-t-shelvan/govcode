@@ -20,10 +20,10 @@ type BOM struct {
 }
 
 type Metadata struct {
-	Timestamp  string      `json:"timestamp"`
-	Tools      *Tools      `json:"tools,omitempty"`
-	Component  *Component  `json:"component,omitempty"`
-	Properties []Property  `json:"properties,omitempty"`
+	Timestamp  string     `json:"timestamp"`
+	Tools      *Tools     `json:"tools,omitempty"`
+	Component  *Component `json:"component,omitempty"`
+	Properties []Property `json:"properties,omitempty"`
 }
 
 type Tools struct {
@@ -87,15 +87,17 @@ type ModelCard struct {
 }
 
 type ModelParameters struct {
-	Approach           *struct{ Type string `json:"type"` } `json:"approach,omitempty"`
-	Task               string                                `json:"task,omitempty"`
-	ArchitectureFamily string                                `json:"architectureFamily,omitempty"`
-	ModelArchitecture  string                                `json:"modelArchitecture,omitempty"`
+	Approach *struct {
+		Type string `json:"type"`
+	} `json:"approach,omitempty"`
+	Task               string `json:"task,omitempty"`
+	ArchitectureFamily string `json:"architectureFamily,omitempty"`
+	ModelArchitecture  string `json:"modelArchitecture,omitempty"`
 }
 
 type Considerations struct {
-	UseCases          []string `json:"useCases,omitempty"`
-	TechnicalLimits   []string `json:"technicalLimitations,omitempty"`
+	UseCases        []string `json:"useCases,omitempty"`
+	TechnicalLimits []string `json:"technicalLimitations,omitempty"`
 }
 
 type Dependency struct {

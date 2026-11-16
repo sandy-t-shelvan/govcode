@@ -36,9 +36,11 @@ type fileSigner struct {
 	priv ed25519.PrivateKey
 }
 
-func (s fileSigner) Sign(msg []byte) ([]byte, error) { return s.priv.Sign(rand.Reader, msg, crypto.Hash(0)) }
-func (s fileSigner) Public() ed25519.PublicKey      { return s.priv.Public().(ed25519.PublicKey) }
-func (s fileSigner) KeyID() string                  { return KeyID(s.Public()) }
+func (s fileSigner) Sign(msg []byte) ([]byte, error) {
+	return s.priv.Sign(rand.Reader, msg, crypto.Hash(0))
+}
+func (s fileSigner) Public() ed25519.PublicKey { return s.priv.Public().(ed25519.PublicKey) }
+func (s fileSigner) KeyID() string             { return KeyID(s.Public()) }
 
 // KeyID is the first 16 hex chars of SHA-256 over the raw public key.
 func KeyID(pub ed25519.PublicKey) string {

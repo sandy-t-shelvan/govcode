@@ -36,14 +36,14 @@ func AIBOM(l *modelpin.Lock) *BOM {
 			up.Components = append(up.Components, fc)
 		}
 		served := Component{
-			BOMRef:    "model:" + m.ID,
-			Type:      "machine-learning-model",
-			Name:      m.Name,
-			Version:   m.Artifact.Quant,
-			Publisher: m.Publisher,
-			Licenses:  License(m.License),
+			BOMRef:      "model:" + m.ID,
+			Type:        "machine-learning-model",
+			Name:        m.Name,
+			Version:     m.Artifact.Quant,
+			Publisher:   m.Publisher,
+			Licenses:    License(m.License),
 			Description: fmt.Sprintf("%s quantized %s (%s), served locally", m.Name, m.Artifact.Quant, m.Artifact.Format),
-			Pedigree:  &Pedigree{Ancestors: []Component{up}, Notes: "produced_by: " + m.Artifact.ProducedBy},
+			Pedigree:    &Pedigree{Ancestors: []Component{up}, Notes: "produced_by: " + m.Artifact.ProducedBy},
 			ModelCard: &ModelCard{
 				ModelParameters: &ModelParameters{Task: "text-generation", ArchitectureFamily: "transformer", ModelArchitecture: m.Name},
 				Considerations: &Considerations{
