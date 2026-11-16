@@ -36,7 +36,7 @@ import (
 const usage = `govcode - air-gapped coding agent for legacy code
 
 Developer:
-  govcode run "<task>"            run the agent; produces a signed proposal (never touches the target branch)
+  govcode run [--plan] "<task>"   run the agent; produces a signed proposal (never touches the target branch)
   govcode proposals               list proposals
   govcode review <id>             show a proposal: summary, tests, diff, audit trail
 
@@ -149,6 +149,7 @@ func cmdRun(ctx context.Context, args []string) error {
 	fs, pol := flags("run")
 	verbose := fs.Bool("verbose", false, "show tool output")
 	yes := fs.Bool("non-interactive", false, "never prompt; non-allowlisted commands are denied")
+	plan := fs.Bool("plan", false, "plan mode: read-only until you approve the model's plan")
 	pos := parse(fs, args)
 	task := strings.Join(pos, " ")
 	if strings.TrimSpace(task) == "" {
@@ -163,7 +164,7 @@ func cmdRun(ctx context.Context, args []string) error {
 		fmt.Fprintln(os.Stderr, "warning:", w)
 	}
 	banner(a)
-	p, err := a.Run(ctx, app.RunOptions{Task: task, Interactive: !*yes, Verbose: *verbose})
+	p, err := a.Run(ctx, app.RunOptions{Task: task, Interactive: !*yes, Verbose: *verbose, Plan: *plan})
 	if p != nil {
 		fmt.Printf("\nProposal %s: %s\n  branch %s (%s..%s)\n  files: %s\n  tests: %s runs=%d passed=%v\n",
 			p.ID, p.Status, p.Branch, p.Base[:10], p.Head[:10], strings.Join(p.Files, ", "), p.Tests.Command, p.Tests.Runs, p.Tests.Passed)

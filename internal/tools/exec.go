@@ -71,12 +71,18 @@ type ExecResult struct {
 }
 
 func (r *Runner) Run(ctx context.Context, command string, timeout time.Duration) ExecResult {
+	return r.RunWith(ctx, command, timeout, nil)
+}
+
+// RunWith is Run with extra KEY=VALUE environment for this command only.
+func (r *Runner) RunWith(ctx context.Context, command string, timeout time.Duration, extra []string) ExecResult {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	env := append([]string{
 		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
 		"HOME=/tmp", "TMPDIR=/tmp", "LANG=C.UTF-8", "LC_ALL=C.UTF-8", "TERM=dumb",
 	}, r.Env...)
+	env = append(env, extra...)
 	var cmd *exec.Cmd
 	sandbox := "none"
 	if r.bwrap != "" {

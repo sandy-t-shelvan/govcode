@@ -28,6 +28,9 @@ Rules:
 func taskPrompt(task string, ctx RepoContext) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Task: %s\n\n", strings.TrimSpace(task))
+	if ctx.Memory != "" {
+		b.WriteString("Project conventions (follow them):\n" + ctx.Memory + "\n")
+	}
 	if ctx.Summary != "" {
 		b.WriteString("Repository overview:\n" + ctx.Summary + "\n")
 	}
@@ -42,4 +45,6 @@ func taskPrompt(task string, ctx RepoContext) string {
 type RepoContext struct {
 	Summary     string
 	TestCommand string
+	// Memory is site instructions plus the repository's root GOVCODE.md.
+	Memory string
 }

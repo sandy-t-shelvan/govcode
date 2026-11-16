@@ -89,5 +89,16 @@
   "secrets": {
     "allow": []
   },
-  "spillage_guard": true
+  "spillage_guard": true,
+  "hooks": {
+    "post_edit": [
+      "/opt/govcode/hooks/cppcheck.sh"
+    ],
+    "pre_proposal": [
+      "/opt/govcode/hooks/cppcheck.sh",
+      "/opt/govcode/hooks/gnat-style.sh"
+    ]
+  },
+  "site_instructions": "/etc/govcode/site-instructions.md",
+  "require_plan_approval": true
 }
