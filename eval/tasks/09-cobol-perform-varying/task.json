@@ -1,0 +1,21 @@
+{
+  "id": "09-cobol-perform-varying",
+  "language": "COBOL",
+  "title": "Annual total skips December",
+  "prompt": "ANNUAL.cbl sums twelve monthly amounts (100, 200, ... 1200) and should print ANNUAL=   7800.00, but the total is short by exactly December's amount. Fix the loop in the SUM-AMOUNTS paragraph. Keep fixed-format columns.",
+  "test_command": "make -s test",
+  "check_command": "make -s test",
+  "requires": [
+    "cobc"
+  ],
+  "oracle": [
+    {
+      "tool": "edit_file",
+      "args": {
+        "path": "ANNUAL.cbl",
+        "old_text": "           PERFORM VARYING WS-I FROM 1 BY 1 UNTIL WS-I > 11",
+        "new_text": "           PERFORM VARYING WS-I FROM 1 BY 1 UNTIL WS-I > 12"
+      }
+    }
+  ]
+}

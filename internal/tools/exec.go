@@ -36,7 +36,7 @@ type Runner struct {
 	shell     string
 }
 
-var defaultRO = []string{"/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/libx32", "/etc/alternatives", "/etc/ld.so.cache", "/etc/ld.so.conf", "/etc/ld.so.conf.d", "/etc/passwd", "/etc/group", "/etc/localtime", "/opt"}
+var defaultRO = []string{"/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/libx32", "/etc/alternatives", "/etc/ld.so.cache", "/etc/ld.so.conf", "/etc/ld.so.conf.d", "/etc/passwd", "/etc/group", "/etc/localtime", "/etc/gnucobol", "/etc/gprconfig", "/opt"}
 
 func NewRunner(mode, worktree string, extraRO, env []string) (*Runner, error) {
 	r := &Runner{Mode: mode, Worktree: worktree, ExtraRO: extraRO, Env: env, MaxOutput: 30000}

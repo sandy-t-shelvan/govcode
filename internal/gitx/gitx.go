@@ -83,13 +83,18 @@ func (a Author) env(prefix string) []string {
 	return []string{"GIT_" + prefix + "_NAME=" + a.Name, "GIT_" + prefix + "_EMAIL=" + a.Email}
 }
 
-// CommitAll stages everything in the worktree and commits. Hooks are
-// disabled: repository hooks are code the model could have written.
-func CommitAll(wt string, msg string, author, committer Author) (string, error) {
-	if _, err := run(wt, nil, "add", "-A"); err != nil {
+// CommitPaths stages exactly the given repo-relative paths (additions,
+// modifications or deletions) and commits. Build outputs and other side
+// effects of commands are deliberately not included. Hooks are disabled:
+// repository hooks are code the model could have written.
+func CommitPaths(wt string, paths []string, msg string, author, committer Author) (string, error) {
+	if len(paths) == 0 {
+		return "", fmt.Errorf("no changes to commit")
+	}
+	if _, err := run(wt, nil, append([]string{"add", "-A", "--"}, paths...)...); err != nil {
 		return "", err
 	}
-	if out, _ := run(wt, nil, "status", "--porcelain"); strings.TrimSpace(out) == "" {
+	if out, _ := run(wt, nil, "diff", "--cached", "--name-only"); strings.TrimSpace(out) == "" {
 		return "", fmt.Errorf("no changes to commit")
 	}
 	env := append(author.env("AUTHOR"), committer.env("COMMITTER")...)
@@ -98,6 +103,23 @@ func CommitAll(wt string, msg string, author, committer Author) (string, error) 
 	}
 	out, err := run(wt, nil, "rev-parse", "HEAD")
 	return strings.TrimSpace(out), err
+}
+
+// CommitAll stages everything in the worktree and commits.
+func CommitAll(wt string, msg string, author, committer Author) (string, error) {
+	return CommitPaths(wt, []string{"."}, msg, author, committer)
+}
+
+// Untracked lists worktree changes not staged (e.g. build outputs).
+func Untracked(wt string) []string {
+	out, _ := run(wt, nil, "status", "--porcelain", "--untracked-files=all")
+	var fs []string
+	for _, l := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		if len(l) > 3 {
+			fs = append(fs, strings.TrimSpace(l[3:]))
+		}
+	}
+	return fs
 }
 
 func (r *Repo) Diff(base, head string) (string, error) {

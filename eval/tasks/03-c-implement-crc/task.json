@@ -1,0 +1,21 @@
+{
+  "id": "03-c-implement-crc",
+  "language": "C",
+  "title": "Implement stubbed CRC-16/CCITT",
+  "prompt": "crc16_ccitt() in crc.c is a stub that returns 0. Implement it as specified in crc.h: CRC-16/CCITT-FALSE, polynomial 0x1021, initial value 0xFFFF, MSB-first (no reflection), no final XOR. The check value for the ASCII string \"123456789\" is 0x29B1. Keep it C89 and table-free.",
+  "test_command": "make -s test",
+  "check_command": "make -s test",
+  "requires": [
+    "cc"
+  ],
+  "oracle": [
+    {
+      "tool": "edit_file",
+      "args": {
+        "path": "crc.c",
+        "old_text": "    (void)buf;\n    (void)len;\n    return 0;",
+        "new_text": "    unsigned short crc = 0xFFFF;\n    unsigned long i;\n    int b;\n    for (i = 0; i < len; i++) {\n        crc ^= (unsigned short)(buf[i] << 8);\n        for (b = 0; b < 8; b++)\n            crc = (crc & 0x8000) ? (unsigned short)((crc << 1) ^ 0x1021) : (unsigned short)(crc << 1);\n    }\n    return crc;"
+      }
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "id": "06-ada-constraint-error",
+  "language": "Ada",
+  "title": "Constraint_Error when turn crosses north",
+  "prompt": "Nav.Turn raises Constraint_Error when the turn crosses north, e.g. Turn (From => 350, To => 10) should return 20 (clockwise degrees) but crashes. Fix Nav.Turn in nav.adb so it always returns the clockwise turn in 0 .. 359, and add the 350 -> 10 case to test_nav.adb.",
+  "test_command": "make -s test",
+  "check_command": "make -s test",
+  "requires": [
+    "gnatmake"
+  ],
+  "oracle": [
+    {
+      "tool": "edit_file",
+      "args": {
+        "path": "nav.adb",
+        "old_text": "      return To - From;",
+        "new_text": "      return (To - From) mod 360;"
+      }
+    }
+  ]
+}

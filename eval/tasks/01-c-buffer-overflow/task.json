@@ -1,0 +1,21 @@
+{
+  "id": "01-c-buffer-overflow",
+  "language": "C",
+  "title": "Unbounded strcpy overruns callsign buffer",
+  "prompt": "track_init() in track.c overruns the callsign buffer when the callsign is longer than 7 characters, corrupting the guard field. Fix it so long callsigns are truncated to CALLSIGN_LEN-1 characters and always NUL-terminated. Keep the code C89.",
+  "test_command": "make -s test",
+  "check_command": "make -s test",
+  "requires": [
+    "cc"
+  ],
+  "oracle": [
+    {
+      "tool": "edit_file",
+      "args": {
+        "path": "track.c",
+        "old_text": "    strcpy(t->callsign, callsign);",
+        "new_text": "    strncpy(t->callsign, callsign, CALLSIGN_LEN - 1);\n    t->callsign[CALLSIGN_LEN - 1] = '\\0';"
+      }
+    }
+  ]
+}
