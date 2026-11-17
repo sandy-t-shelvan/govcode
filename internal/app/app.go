@@ -543,6 +543,9 @@ func loadKeys(paths []string) ([]ed25519.PublicKey, error) {
 func (a *App) Backend() (llm.Backend, error) {
 	p := a.Policy.Model
 	opts := llm.Options{NumCtx: p.NumCtx, MaxTokens: p.MaxTokens, Temperature: p.Temperature, Seed: 42}
+	if a.Model != nil {
+		opts.ToolPrompt = a.Model.Serve.ToolPrompt
+	}
 	name := p.ServedName
 	if name == "" && a.Model != nil {
 		name = a.Model.Serve.OllamaName

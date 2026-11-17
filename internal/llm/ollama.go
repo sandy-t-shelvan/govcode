@@ -57,6 +57,7 @@ func (o *Ollama) Chat(ctx context.Context, msgs []Message, tools []ToolSpec) (*R
 
 // body builds the /api/chat request; num_ctx is always set explicitly.
 func (o *Ollama) body(msgs []Message, tools []ToolSpec) map[string]any {
+	msgs = withToolPrompt(msgs, tools, o.Opts.ToolPrompt)
 	om := make([]ollamaMsg, 0, len(msgs))
 	for _, m := range msgs {
 		x := ollamaMsg{Role: m.Role, Content: m.Content, ToolName: m.ToolName}

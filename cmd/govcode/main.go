@@ -780,7 +780,7 @@ func cmdEval(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("eval", flag.ExitOnError)
 	tasks := fs.String("tasks", "eval/tasks", "task directory")
 	out := fs.String("o", "eval/results", "results directory")
-	only := fs.String("only", "", "run only tasks whose id contains this")
+	only := fs.String("only", "", "run only tasks whose id contains this (comma-separated list allowed)")
 	backend := fs.String("backend", "ollama", "ollama | openai | oracle")
 	endpoint := fs.String("endpoint", "http://127.0.0.1:11434", "model server (loopback)")
 	model := fs.String("model", "govcode-devstral:24b-q4km", "served model name")
@@ -789,6 +789,7 @@ func cmdEval(ctx context.Context, args []string) error {
 	temp := fs.Float64("temperature", 0.2, "temperature")
 	turns := fs.Int("max-turns", 30, "max agent turns per task")
 	verbose := fs.Bool("verbose", false, "stream agent output")
+	toolPrompt := fs.String("tool-prompt", "", "text appended to the system prompt when tools are offered (the lock's serve.tool_prompt)")
 	fs.Parse(args)
 	cfg := eval.Config{TasksDir: *tasks, OutDir: *out, Only: *only, MaxTurns: *turns}
 	if *verbose {
@@ -796,7 +797,7 @@ func cmdEval(ctx context.Context, args []string) error {
 	} else {
 		cfg.Log = io.Discard
 	}
-	opts := llm.Options{NumCtx: *numCtx, MaxTokens: *maxTok, Temperature: *temp, Seed: 42}
+	opts := llm.Options{NumCtx: *numCtx, MaxTokens: *maxTok, Temperature: *temp, Seed: 42, ToolPrompt: *toolPrompt}
 	switch *backend {
 	case "ollama":
 		cfg.NewBackend = func() (llm.Backend, error) { return llm.NewOllama(*endpoint, *model, opts) }

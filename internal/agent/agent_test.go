@@ -142,3 +142,21 @@ func TestHistoryResumesWithApprovedPlanAndOnTurn(t *testing.T) {
 type rejectAll struct{}
 
 func (rejectAll) ReviewPlan([]string, string) (bool, string) { return false, "no" }
+
+func TestNagRepeatsToolPrompt(t *testing.T) {
+	env := fixture(t)
+	model := &llm.Scripted{Opts: llm.Options{NumCtx: 8192, MaxTokens: 512, ToolPrompt: "Respond with <|tool_call|>[...]"},
+		Responses: []llm.Response{{Content: "Tool: run_tests"}, {Content: "still prose"}}}
+	a := &Agent{Backend: model, Tools: tools.NewSet(env), Rec: &rec{}, Cfg: Config{MaxNoCallNags: 1}}
+	res, _ := a.Run(context.Background(), "fix it", RepoContext{TestCommand: env.TestCommand})
+	if res == nil || res.Metrics.StopReason != "no_tool_call" {
+		t.Fatalf("result %+v", res)
+	}
+	last := model.Seen[1][len(model.Seen[1])-1]
+	if last.Role != llm.RoleUser || !strings.Contains(last.Content, "You did not call a tool") || !strings.HasSuffix(last.Content, "Respond with <|tool_call|>[...]") {
+		t.Errorf("nag %q", last.Content)
+	}
+	if nagText("") != "You did not call a tool. Continue the task by calling a tool now. If the task is complete and tests pass, call finish." {
+		t.Error("nag without a tool prompt changed")
+	}
+}

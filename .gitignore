@@ -4,3 +4,6 @@
 *.out
 .govcode-state/
 eval/results/
+
+# Claude Code personal settings
+.claude/settings.local.json

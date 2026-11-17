@@ -54,6 +54,7 @@ func (o *OpenAICompat) Chat(ctx context.Context, msgs []Message, tools []ToolSpe
 }
 
 func (o *OpenAICompat) body(msgs []Message, tools []ToolSpec) map[string]any {
+	msgs = withToolPrompt(msgs, tools, o.Opts.ToolPrompt)
 	om := make([]oaiMsg, 0, len(msgs))
 	for _, m := range msgs {
 		content := m.Content

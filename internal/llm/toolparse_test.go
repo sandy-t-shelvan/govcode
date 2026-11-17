@@ -2,6 +2,7 @@ package llm
 
 import (
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 )
@@ -134,5 +135,145 @@ func TestUnparseableArgsReportedToModel(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "not a valid JSON object") {
 			t.Errorf("args %q: want unparseable error, got %v", raw, err)
 		}
+	}
+}
+
+func TestGraniteToolCalls(t *testing.T) {
+	tools := []ToolSpec{{Name: "read_file"}, {Name: "run_tests"}}
+	cases := []struct {
+		in    string
+		names []string
+		rest  string
+	}{
+		// What llama.cpp returns: the <|tool_call|> special token is stripped.
+		{`[{"arguments": {"path": "src/PAYROLL.cbl"}, "name": "read_file"}]`, []string{"read_file"}, ""},
+		{"I will read it.\n<|tool_call|>[{\"name\":\"read_file\",\"arguments\":{\"path\":\"a.c\"}},{\"name\":\"run_tests\",\"arguments\":{}}]", []string{"read_file", "run_tests"}, "I will read it."},
+		// Unknown tool in a bare list: not a call.
+		{`[{"name": "rm_rf", "arguments": {}}]`, nil, ""},
+		// Ordinary JSON array in prose is not a call.
+		{`[1, 2, 3]`, nil, ""},
+		{`The values are [{"name": "read_file"}] in the table.`, nil, ""},
+	}
+	for _, c := range cases {
+		calls, rest := ExtractToolCalls(c.in, tools)
+		if len(calls) != len(c.names) {
+			t.Fatalf("%q: got %d calls, want %d", c.in, len(calls), len(c.names))
+		}
+		for i, n := range c.names {
+			if calls[i].Name != n || calls[i].Source != SourceGranite {
+				t.Errorf("%q: call %d = %s/%s", c.in, i, calls[i].Name, calls[i].Source)
+			}
+		}
+		if len(c.names) > 0 && rest != c.rest {
+			t.Errorf("%q: rest %q, want %q", c.in, rest, c.rest)
+		}
+	}
+	calls, _ := ExtractToolCalls(`[{"arguments": {"path": "x.c"}, "name": "read_file"}]`, tools)
+	if string(calls[0].Args) != `{"path":"x.c"}` && string(calls[0].Args) != `{"path": "x.c"}` {
+		t.Errorf("args %s", calls[0].Args)
+	}
+}
+
+func TestWithToolPrompt(t *testing.T) {
+	msgs := []Message{{Role: RoleSystem, Content: "sys\n"}, {Role: RoleUser, Content: "u"}}
+	tools := []ToolSpec{{Name: "read_file"}}
+	got := withToolPrompt(msgs, tools, "CALL TOOLS LIKE THIS")
+	if got[0].Content != "sys\n\nCALL TOOLS LIKE THIS" || msgs[0].Content != "sys\n" {
+		t.Fatalf("got %q, original %q", got[0].Content, msgs[0].Content)
+	}
+	if g := withToolPrompt(msgs, nil, "X"); g[0].Content != "sys\n" {
+		t.Error("prompt added without tools")
+	}
+	if g := withToolPrompt(msgs[1:], tools, "X"); len(g) != 2 || g[0].Role != RoleSystem || g[0].Content != "X" {
+		t.Errorf("no system message: %+v", g)
+	}
+	// Both backends send it.
+	o, err := NewOpenAICompat("http://127.0.0.1:1/v1", "m", Options{NumCtx: 4096, ToolPrompt: "TP"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := o.body(msgs, tools)
+	if m := b["messages"].([]oaiMsg); !strings.HasSuffix(*m[0].Content, "TP") {
+		t.Errorf("openai body: %q", *m[0].Content)
+	}
+	ol, err := NewOllama("http://127.0.0.1:1", "m", Options{NumCtx: 4096, ToolPrompt: "TP"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m := ol.body(msgs, tools)["messages"].([]ollamaMsg); !strings.HasSuffix(m[0].Content, "TP") {
+		t.Errorf("ollama body: %q", m[0].Content)
+	}
+}
+
+func TestRepairInvalidEscapes(t *testing.T) {
+	cases := map[string]string{
+		`{"new_text":"buf[0] = '\0';"}`:       `buf[0] = '\0';`,
+		`{"new_text":"printf(\"%d\\n\", x)"}`: `printf("%d\n", x)`,
+		`{"new_text":"c = '\x41'"}`:           `c = '\x41'`,
+		`{"new_text":"é and \uZZ"}`:           `é and \uZZ`,
+		`{"new_text":"tab\there"}`:            "tab\there",
+	}
+	for in, want := range cases {
+		var v struct {
+			NewText string `json:"new_text"`
+		}
+		if err := json.Unmarshal([]byte(RepairJSON(in)), &v); err != nil {
+			t.Errorf("%s: %v (repaired %s)", in, err, RepairJSON(in))
+			continue
+		}
+		if v.NewText != want {
+			t.Errorf("%s: got %q, want %q", in, v.NewText, want)
+		}
+	}
+}
+
+// A real Granite-3.3-8B reply from the GOV-40 air-gapped run: four calls in
+// one list, the edit containing C's '\0'. Before the escape repair, the
+// whole list failed to parse and no call ran.
+func TestGraniteRealMultiCall(t *testing.T) {
+	b, err := os.ReadFile("testdata/granite_multi_call.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tools := []ToolSpec{{Name: "read_file"}, {Name: "search"}, {Name: "update_plan"}, {Name: "edit_file"}}
+	calls, _ := ExtractToolCalls(string(b), tools)
+	var names []string
+	for _, c := range calls {
+		names = append(names, c.Name)
+	}
+	if strings.Join(names, ",") != "read_file,search,update_plan,edit_file" {
+		t.Fatalf("calls %v", names)
+	}
+	var edit struct {
+		NewText string `json:"new_text"`
+	}
+	json.Unmarshal(calls[3].Args, &edit)
+	if !strings.Contains(edit.NewText, `t->callsign[CALLSIGN_LEN - 1] = '\0';`) {
+		t.Errorf("new_text lost the C literal: %q", edit.NewText)
+	}
+}
+
+// A real Granite reply after a no-call nag: an arguments-only object (not a
+// call) and then the call as a fenced JSON list. Before, only fenced
+// objects were accepted and the edit was dropped.
+func TestFencedListRealGranite(t *testing.T) {
+	b, err := os.ReadFile("testdata/granite_fenced_list.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls, _ := ExtractToolCalls(string(b), []ToolSpec{{Name: "edit_file"}, {Name: "run_tests"}})
+	if len(calls) != 1 || calls[0].Name != "edit_file" || calls[0].Source != SourceJSON {
+		t.Fatalf("calls %+v", calls)
+	}
+	var a struct {
+		OldText string `json:"old_text"`
+	}
+	json.Unmarshal(calls[0].Args, &a)
+	if a.OldText != "strcpy(t->callsign, callsign);" {
+		t.Errorf("old_text %q", a.OldText)
+	}
+	// A fenced list with an unknown name is not a call.
+	if c, _ := ExtractToolCalls("```json\n[{\"name\":\"edit_file\",\"arguments\":{}},{\"name\":\"rm\",\"arguments\":{}}]\n```", []ToolSpec{{Name: "edit_file"}}); len(c) != 0 {
+		t.Errorf("unknown tool in list accepted: %+v", c)
 	}
 }

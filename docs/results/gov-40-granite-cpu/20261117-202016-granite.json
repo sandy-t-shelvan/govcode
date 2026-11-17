@@ -1,0 +1,232 @@
+{
+  "model": "granite",
+  "num_ctx": 16384,
+  "started": "2026-11-17T19:21:44Z",
+  "results": [
+    {
+      "id": "04-cpp-auto-ptr",
+      "language": "C++",
+      "title": "Port std::auto_ptr to C++17",
+      "passed": false,
+      "check_output": "sensor_bus.h:19:    std::auto_ptr\u003cSensor\u003e slots_[kMax];\nmake: *** [Makefile:10: no-auto-ptr] Error 1\n",
+      "metrics": {
+        "turns": 7,
+        "calls_emitted": 8,
+        "parsed_by": {
+          "fallback-granite": 8
+        },
+        "unknown_tool": 0,
+        "schema_invalid": 1,
+        "exec_ok": 5,
+        "exec_error": 2,
+        "no_call_turns": 4,
+        "context_trims": 0,
+        "prompt_tokens": 29726,
+        "completion_tokens": 7334,
+        "model_time_ns": 3511923953642,
+        "finished": false,
+        "stop_reason": "no_tool_call"
+      },
+      "valid_call_rate": 0.875,
+      "changed": [
+        "sensor_bus.cpp"
+      ],
+      "duration_s": 3512.285980055
+    },
+    {
+      "id": "05-cpp-rule-of-three",
+      "language": "C++",
+      "title": "Shallow copy causes double free",
+      "passed": false,
+      "check_output": "e[](void*) ../../../../src/libsanitizer/asan/asan_new_delete.cpp:155\n    #1 0x556f711e4453 in MsgBuf::~MsgBuf() /tmp/govcode-check-2170159951/msgbuf.cpp:12\n    #2 0x556f711e48b4 in main /tmp/govcode-check-2170159951/test_05.cpp:18\n    #3 0x7f37b342a1c9 in __libc_start_call_main ../sysdeps/nptl/libc_start_call_main.h:58\n    #4 0x7f37b342a28a in __libc_start_main_impl ../csu/libc-start.c:360\n    #5 0x556f711e42a4 in _start (/tmp/govcode-check-2170159951/test_05+0x12a4) (BuildId: 2b7e6b5118785fc14a784763e1c16a640f44eed1)\n\n0x502000000010 is located 0 bytes inside of 16-byte region [0x502000000010,0x502000000020)\nfreed by thread T0 here:\n    #0 0x7f37b3cff1f8 in operator delete[](void*) ../../../../src/libsanitizer/asan/asan_new_delete.cpp:155\n    #1 0x556f711e4453 in MsgBuf::~MsgBuf() /tmp/govcode-check-2170159951/msgbuf.cpp:12\n    #2 0x556f711e48a8 in main /tmp/govcode-check-2170159951/test_05.cpp:18\n    #3 0x7f37b342a1c9 in __libc_start_call_main ../sysdeps/nptl/libc_start_call_main.h:58\n    #4 0x7f37b342a28a in __libc_start_main_impl ../csu/libc-start.c:360\n    #5 0x556f711e42a4 in _start (/tmp/govcode-check-2170159951/test_05+0x12a4) (BuildId: 2b7e6b5118785fc14a784763e1c16a640f44eed1)\n\npreviously allocated by thread T0 here:\n    #0 0x7f37b3cfe6c8 in operator new[](unsigned long) ../../../../src/libsanitizer/asan/asan_new_delete.cpp:98\n    #1 0x556f711e43b5 in MsgBuf::MsgBuf(unsigned long) /tmp/govcode-check-2170159951/msgbuf.cpp:5\n    #2 0x556f711e4525 in main /tmp/govcode-check-2170159951/test_05.cpp:5\n    #3 0x7f37b342a1c9 in __libc_start_call_main ../sysdeps/nptl/libc_start_call_main.h:58\n    #4 0x7f37b342a28a in __libc_start_main_impl ../csu/libc-start.c:360\n    #5 0x556f711e42a4 in _start (/tmp/govcode-check-2170159951/test_05+0x12a4) (BuildId: 2b7e6b5118785fc14a784763e1c16a640f44eed1)\n\nSUMMARY: AddressSanitizer: double-free ../../../../src/libsanitizer/asan/asan_new_delete.cpp:155 in operator delete[](void*)\n==10==ABORTING\nmake: *** [Makefile:4: test] Error 1\n",
+      "metrics": {
+        "turns": 9,
+        "calls_emitted": 4,
+        "parsed_by": {
+          "fallback-granite": 4
+        },
+        "unknown_tool": 0,
+        "schema_invalid": 1,
+        "exec_ok": 2,
+        "exec_error": 1,
+        "no_call_turns": 5,
+        "context_trims": 0,
+        "prompt_tokens": 28161,
+        "completion_tokens": 2702,
+        "model_time_ns": 1074350503998,
+        "finished": false,
+        "stop_reason": "no_tool_call"
+      },
+      "valid_call_rate": 0.75,
+      "changed": null,
+      "duration_s": 1074.62748785
+    },
+    {
+      "id": "06-ada-constraint-error",
+      "language": "Ada",
+      "title": "Constraint_Error when turn crosses north",
+      "passed": true,
+      "check_output": "ok\n",
+      "metrics": {
+        "turns": 12,
+        "calls_emitted": 17,
+        "parsed_by": {
+          "fallback-granite": 17
+        },
+        "unknown_tool": 0,
+        "schema_invalid": 0,
+        "exec_ok": 15,
+        "exec_error": 2,
+        "no_call_turns": 5,
+        "context_trims": 0,
+        "prompt_tokens": 34581,
+        "completion_tokens": 910,
+        "model_time_ns": 361928510329,
+        "finished": false,
+        "stop_reason": "no_tool_call"
+      },
+      "valid_call_rate": 1,
+      "changed": [
+        "nav.adb"
+      ],
+      "duration_s": 362.16724776
+    },
+    {
+      "id": "07-ada-missing-body",
+      "language": "Ada",
+      "title": "Implement procedure declared in spec",
+      "passed": false,
+      "check_output": "sensors.adb:1:14: error: missing body for \"Clamp\" declared at sensors.ads:4\ngnatmake: \"sensors.adb\" compilation error\nmake: *** [Makefile:5: test_sensors] Error 4\n",
+      "metrics": {
+        "turns": 16,
+        "calls_emitted": 15,
+        "parsed_by": {
+          "fallback-granite": 15
+        },
+        "unknown_tool": 0,
+        "schema_invalid": 0,
+        "exec_ok": 10,
+        "exec_error": 5,
+        "no_call_turns": 6,
+        "context_trims": 0,
+        "prompt_tokens": 46279,
+        "completion_tokens": 1722,
+        "model_time_ns": 652600142295,
+        "finished": false,
+        "stop_reason": "no_tool_call"
+      },
+      "valid_call_rate": 1,
+      "changed": null,
+      "duration_s": 652.828858679
+    },
+    {
+      "id": "08-cobol-pic-truncation",
+      "language": "COBOL",
+      "title": "Rate truncated by PIC clause",
+      "passed": false,
+      "check_output": "INTEREST=    500.00\nmake: *** [Makefile:2: test] Error 1\n",
+      "metrics": {
+        "turns": 11,
+        "calls_emitted": 10,
+        "parsed_by": {
+          "fallback-granite": 10
+        },
+        "unknown_tool": 0,
+        "schema_invalid": 0,
+        "exec_ok": 9,
+        "exec_error": 1,
+        "no_call_turns": 5,
+        "context_trims": 0,
+        "prompt_tokens": 31689,
+        "completion_tokens": 1006,
+        "model_time_ns": 409584130867,
+        "finished": false,
+        "stop_reason": "no_tool_call"
+      },
+      "valid_call_rate": 1,
+      "changed": [
+        "INTCALC.cbl"
+      ],
+      "duration_s": 409.931406245
+    },
+    {
+      "id": "09-cobol-perform-varying",
+      "language": "COBOL",
+      "title": "Annual total skips December",
+      "passed": false,
+      "check_output": "\u003ccommand-line\u003e: warning: \"_FORTIFY_SOURCE\" redefined\n\u003ccommand-line\u003e: note: this is the location of the previous definition\nANNUAL=   6600.00\nmake: *** [Makefile:2: test] Error 1\n",
+      "metrics": {
+        "turns": 14,
+        "calls_emitted": 10,
+        "parsed_by": {
+          "fallback-granite": 8,
+          "fallback-json": 2
+        },
+        "unknown_tool": 0,
+        "schema_invalid": 1,
+        "exec_ok": 5,
+        "exec_error": 4,
+        "no_call_turns": 5,
+        "context_trims": 0,
+        "prompt_tokens": 41803,
+        "completion_tokens": 1215,
+        "model_time_ns": 484825447726,
+        "finished": false,
+        "stop_reason": "no_tool_call"
+      },
+      "valid_call_rate": 0.9,
+      "changed": null,
+      "duration_s": 485.005499043
+    },
+    {
+      "id": "10-c-rename-across-files",
+      "language": "C",
+      "title": "Rename a function across the codebase",
+      "passed": false,
+      "check_output": "src/log.c:6:    printf(\"ch%d=%d\\n\", channel, getTemp(channel));\nsrc/sensor.h:4:int getTemp(int channel);\nsrc/sensor.c:3:int getTemp(int channel)\nsrc/monitor.c:5:    int i, m = getTemp(0);\nsrc/monitor.c:7:        if (getTemp(i) \u003e m)\nsrc/monitor.c:8:            m = getTemp(i);\nmake: *** [Makefile:11: no-old-name] Error 1\n",
+      "metrics": {
+        "turns": 9,
+        "calls_emitted": 8,
+        "parsed_by": {
+          "fallback-granite": 8
+        },
+        "unknown_tool": 0,
+        "schema_invalid": 0,
+        "exec_ok": 5,
+        "exec_error": 3,
+        "no_call_turns": 4,
+        "context_trims": 0,
+        "prompt_tokens": 27676,
+        "completion_tokens": 1106,
+        "model_time_ns": 453668163978,
+        "finished": true,
+        "stop_reason": "finished"
+      },
+      "valid_call_rate": 1,
+      "changed": null,
+      "duration_s": 453.812342955
+    }
+  ],
+  "totals": {
+    "tasks": 7,
+    "run": 7,
+    "passed": 1,
+    "calls_emitted": 72,
+    "valid_calls": 69,
+    "exec_ok": 51,
+    "exec_error": 18,
+    "unknown_tool": 0,
+    "schema_invalid": 3,
+    "no_call_turns": 34,
+    "turns": 78,
+    "parsed_by": {
+      "fallback-granite": 70,
+      "fallback-json": 2
+    },
+    "finished": 1,
+    "prompt_tokens": 239915,
+    "output_tokens": 15995,
+    "model_seconds": 6948.880852835
+  },
+  "complete": true
+}

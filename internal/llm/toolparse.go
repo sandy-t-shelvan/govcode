@@ -18,7 +18,11 @@ import (
 //   - Qwen3-Coder XML:  <tool_call><function=NAME><parameter=K>V</parameter></function></tool_call>
 //   - Hermes/Qwen2.5:   <tool_call>{"name":..., "arguments":{...}}</tool_call>
 //   - Mistral/Devstral: [TOOL_CALLS][{"name":..., "arguments":{...}}]  or  [TOOL_CALLS]NAME[ARGS]{...}
-//   - JSON block:       ```json {"name":..., "arguments":{...}} ```  (only if NAME is a known tool)
+//   - Granite:          <|tool_call|>[{"name":..., "arguments":{...}}]  (the marker is a special
+//     token that servers usually strip, so a bare JSON list is accepted when
+//     every NAME is a known tool)
+//   - JSON block:       ```json {"name":..., "arguments":{...}} ``` or a fenced list of those
+//     (only if every NAME is a known tool)
 func ExtractToolCalls(content string, tools []ToolSpec) ([]ToolCall, string) {
 	known := map[string]ToolSpec{}
 	for _, t := range tools {
@@ -31,6 +35,9 @@ func ExtractToolCalls(content string, tools []ToolSpec) ([]ToolCall, string) {
 		return number(calls), rest
 	}
 	if calls, rest := parseMistral(content, known); len(calls) > 0 {
+		return number(calls), rest
+	}
+	if calls, rest := parseGranite(content, known); len(calls) > 0 {
 		return number(calls), rest
 	}
 	if calls, rest := parseJSONBlocks(content, known); len(calls) > 0 {
@@ -164,14 +171,58 @@ func parseMistral(s string, known map[string]ToolSpec) ([]ToolCall, string) {
 	return calls, strings.TrimSpace(s[:idx])
 }
 
+const graniteMarker = "<|tool_call|>"
+
+// parseGranite reads Granite's tool-call list. Without the marker, the
+// content must be nothing but the list and every name a known tool, so that
+// ordinary JSON in a reply is not mistaken for a call.
+func parseGranite(s string, known map[string]ToolSpec) ([]ToolCall, string) {
+	t, before := strings.TrimSpace(s), ""
+	if i := strings.Index(t, graniteMarker); i >= 0 {
+		before, t = strings.TrimSpace(t[:i]), strings.TrimSpace(t[i+len(graniteMarker):])
+	} else if !strings.HasPrefix(t, "[") || !strings.HasSuffix(t, "]") {
+		return nil, s
+	}
+	var arr []nameArgs
+	if json.Unmarshal([]byte(RepairJSON(t)), &arr) != nil || len(arr) == 0 {
+		return nil, s
+	}
+	var calls []ToolCall
+	for _, na := range arr {
+		if _, ok := known[na.Name]; !ok {
+			return nil, s
+		}
+		calls = append(calls, na.toCall(SourceGranite))
+	}
+	return calls, before
+}
+
 var reFence = regexp.MustCompile("(?s)```(?:json|JSON)?\\s*\n(.*?)```")
 
 func parseJSONBlocks(s string, known map[string]ToolSpec) ([]ToolCall, string) {
 	var calls []ToolCall
 	rest := s
 	try := func(raw string) bool {
+		fixed := RepairJSON(raw)
+		// A list of calls (Granite and others write one when they fall back
+		// to a code fence): every element must name a known tool.
+		if strings.HasPrefix(strings.TrimSpace(fixed), "[") {
+			var arr []nameArgs
+			if json.Unmarshal([]byte(fixed), &arr) != nil || len(arr) == 0 {
+				return false
+			}
+			for _, na := range arr {
+				if _, ok := known[na.Name]; !ok {
+					return false
+				}
+			}
+			for _, na := range arr {
+				calls = append(calls, na.toCall(SourceJSON))
+			}
+			return true
+		}
 		var na nameArgs
-		if json.Unmarshal([]byte(RepairJSON(raw)), &na) != nil {
+		if json.Unmarshal([]byte(fixed), &na) != nil {
 			return false
 		}
 		if _, ok := known[na.Name]; !ok {
@@ -244,6 +295,54 @@ var reTrailingComma = regexp.MustCompile(`,\s*([}\]])`)
 // RepairJSON fixes the faults local models most often make in JSON:
 // surrounding code fences, leading prose, trailing commas, and a missing
 // final brace. It returns the input unchanged if repair does not help.
+// fixInvalidEscapes makes a backslash that does not start a valid JSON
+// escape literal. Models writing C, Ada or COBOL into a JSON string often
+// leave '\0' or '\x41' as is; JSON rejects those, and the whole tool-call
+// list was lost. The model meant the backslash itself, so it is doubled.
+func fixInvalidEscapes(t string) string {
+	var b strings.Builder
+	inStr := false
+	for i := 0; i < len(t); i++ {
+		c := t[i]
+		if !inStr {
+			if c == '"' {
+				inStr = true
+			}
+			b.WriteByte(c)
+			continue
+		}
+		switch c {
+		case '"':
+			inStr = false
+		case '\\':
+			if i+1 < len(t) && strings.IndexByte(`"\\/bfnrtu`, t[i+1]) >= 0 {
+				if t[i+1] == 'u' && !(i+5 < len(t) && isHex4(t[i+2:i+6])) {
+					b.WriteString(`\\`)
+					continue
+				}
+				b.WriteByte(c)
+				b.WriteByte(t[i+1])
+				i++
+				continue
+			}
+			b.WriteString(`\\`)
+			continue
+		}
+		b.WriteByte(c)
+	}
+	return b.String()
+}
+
+func isHex4(s string) bool {
+	for i := 0; i < 4; i++ {
+		c := s[i]
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F') {
+			return false
+		}
+	}
+	return true
+}
+
 func RepairJSON(s string) string {
 	t := strings.TrimSpace(s)
 	t = strings.TrimPrefix(t, "```json")
@@ -256,6 +355,7 @@ func RepairJSON(s string) string {
 	if i := strings.IndexAny(t, "{["); i > 0 {
 		t = t[i:]
 	}
+	t = fixInvalidEscapes(t)
 	t = reTrailingComma.ReplaceAllString(t, "$1")
 	if json.Valid([]byte(t)) {
 		return t
