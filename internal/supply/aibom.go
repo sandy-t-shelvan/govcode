@@ -72,6 +72,15 @@ func AIBOM(l *modelpin.Lock) *BOM {
 				{"govcode:vllm_tool_call_parser", m.Serve.VLLMToolParser},
 			},
 		}
+		if s := m.StagingScan; s != nil {
+			served.Properties = append(served.Properties,
+				Property{"govcode:staging_scan:scanner", s.Scanner + " " + s.Version},
+				Property{"govcode:staging_scan:signatures", s.Signatures},
+				Property{"govcode:staging_scan:result", s.Result},
+				Property{"govcode:staging_scan:scanned_at", s.ScannedAt})
+		} else {
+			served.Properties = append(served.Properties, Property{"govcode:staging_scan:result", "NOT SCANNED"})
+		}
 		if m.Artifact.Repo != "" {
 			served.Properties = append(served.Properties, Property{"govcode:artifact_source", m.Artifact.Repo + "@" + m.Artifact.Revision})
 		}

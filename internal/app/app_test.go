@@ -455,3 +455,37 @@ func TestMissingAnalyzerFailsPreflight(t *testing.T) {
 		t.Fatalf("missing analyzer accepted: %v", err)
 	}
 }
+
+func TestPickleLockEntryAndDirtyScanFailPreflight(t *testing.T) {
+	write := func(m map[string]any) string {
+		b, _ := json.Marshal(map[string]any{"schema": "govcode.models.lock/v1", "models": []any{m}})
+		p := filepath.Join(t.TempDir(), "lock.json")
+		os.WriteFile(p, b, 0o644)
+		return p
+	}
+	base := func() map[string]any {
+		return map[string]any{"id": "m", "name": "M", "publisher": "P", "origin": "FR",
+			"upstream": map[string]any{"repo": "r", "revision": "x", "files": []any{}},
+			"artifact": map[string]any{"format": "gguf", "files": []any{map[string]any{"path": "m.gguf"}}},
+			"serve":    map[string]any{"num_ctx": 32768}}
+	}
+	use := func(lock string) func(*policy.Policy) {
+		return func(p *policy.Policy) { p.Model.Lock, p.Model.ID = lock, "m" }
+	}
+	pickle := base()
+	pickle["upstream"] = map[string]any{"repo": "r", "revision": "x", "files": []any{map[string]any{"path": "pytorch_model.bin"}}}
+	if _, _, err := openWorld(t, use(write(pickle))); err == nil || !strings.Contains(err.Error(), "model format") {
+		t.Fatalf("pickle lock entry accepted: %v", err)
+	}
+	dirty := base()
+	dirty["staging_scan"] = map[string]any{"scanner": "clamscan", "version": "1.4", "result": "Win.Trojan.X FOUND", "scanned_at": "2026-11-17T00:00:00Z"}
+	if _, _, err := openWorld(t, use(write(dirty))); err == nil || !strings.Contains(err.Error(), "model scan") {
+		t.Fatalf("dirty scan accepted: %v", err)
+	}
+	clean := base()
+	clean["staging_scan"] = map[string]any{"scanner": "clamscan", "version": "1.4", "result": "clean", "scanned_at": "2026-11-17T00:00:00Z"}
+	_, checks, err := openWorld(t, use(write(clean)))
+	if err != nil || !hasCheck(checks, "model scan", "PASS") || !hasCheck(checks, "model format", "PASS") {
+		t.Fatalf("%v %+v", err, checks)
+	}
+}

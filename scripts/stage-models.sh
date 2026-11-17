@@ -13,7 +13,21 @@
 # Requires: git, python3 (+ pip for llama.cpp's converter deps), cmake, a C++
 # compiler, curl, sha256sum, jq, ollama (same version as the high side), and
 # a built govcode binary on PATH (used to sign and to emit the AI-BOM).
+#
+# Malware scan (required): set GOVCODE_SCAN_CMD to the site's offline scanner,
+# run with site-provided signatures, e.g.
+#   GOVCODE_SCAN_CMD="clamscan --no-summary --infected --database=/media/sigs"
+#   GOVCODE_SCAN_SIGS="daily.cvd 27471, 2026-11-16"
+# It must exit 0 for clean files. The scanner, its version, the signature
+# version and the result are written into the signed lock and the AI-BOM.
+#
+# Only GGUF and safetensors weights are staged. Any lock entry naming a
+# pickle-based format (.bin .pt .pth .ckpt .pkl ...) is refused before
+# anything is downloaded, and every weight file is checked by content.
 set -euo pipefail
+: "${GOVCODE_SCAN_CMD:?set GOVCODE_SCAN_CMD to the site malware scanner (see the header)}"
+SCAN_BIN=${GOVCODE_SCAN_CMD%% *}
+SCAN_VERSION=$($SCAN_BIN --version 2>&1 | head -n1)
 
 LLAMA_CPP_TAG=b12447
 LLAMA_CPP_COMMIT=a06044b934db085e373286444e0c15b93635a20c
@@ -24,6 +38,7 @@ LOCK_IN=$ROOT/models/models.lock.json
 mkdir -p "$OUT/weights" "$OUT/build"
 cp "$LOCK_IN" "$OUT/models.lock.json"
 LOCK=$OUT/models.lock.json
+govcode model sniff -lock "$LOCK"   # refuse pickle-format entries before any download
 
 hf_get() { # repo revision path dest
   curl -fL --retry 5 -C - -o "$4" "https://huggingface.co/$1/resolve/$2/$3"
@@ -70,6 +85,7 @@ for id in "${IDS[@]}"; do
       else
         verify "$src/$p" "$want"
       fi
+      case "$p" in *.safetensors|*.gguf) govcode model sniff "$src/$p" ;; esac
     done
     # 2. quantize with pinned llama.cpp
     build_llama_cpp
@@ -86,6 +102,14 @@ for id in "${IDS[@]}"; do
     [ -f "$OUT/weights/$gguf" ] || hf_get "$arepo" "$arev" "$gguf" "$OUT/weights/$gguf"
     verify "$OUT/weights/$gguf" "$want"
   fi
+
+  govcode model sniff "$OUT/weights/$gguf"
+
+  # Malware scan with the site's offline scanner; any finding stops staging.
+  if ! scan_out=$($GOVCODE_SCAN_CMD "$OUT/weights/$gguf" 2>&1); then
+    echo "MALWARE SCAN FAILED for $gguf:" >&2; echo "$scan_out" >&2; exit 1
+  fi
+  setlock "(.models[]|select(.id==\"$id\")|.staging_scan) = {scanner: \"$SCAN_BIN\", version: $(jq -Rn --arg v "$SCAN_VERSION" '$v'), signatures: $(jq -Rn --arg v "${GOVCODE_SCAN_SIGS:-unrecorded}" '$v'), result: \"clean\", scanned_at: \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
 
   sha=$(sha256sum "$OUT/weights/$gguf" | cut -d' ' -f1); size=$(stat -c %s "$OUT/weights/$gguf")
   setlock "(.models[]|select(.id==\"$id\")|.artifact.files[0]) |= (.sha256=\"$sha\" | .size=$size)"
