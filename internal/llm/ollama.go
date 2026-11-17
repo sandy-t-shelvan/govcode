@@ -51,6 +51,12 @@ type ollamaMsg struct {
 }
 
 func (o *Ollama) Chat(ctx context.Context, msgs []Message, tools []ToolSpec) (*Response, error) {
+	body := o.body(msgs, tools)
+	return o.chat(ctx, body)
+}
+
+// body builds the /api/chat request; num_ctx is always set explicitly.
+func (o *Ollama) body(msgs []Message, tools []ToolSpec) map[string]any {
 	om := make([]ollamaMsg, 0, len(msgs))
 	for _, m := range msgs {
 		x := ollamaMsg{Role: m.Role, Content: m.Content, ToolName: m.ToolName}
@@ -81,6 +87,10 @@ func (o *Ollama) Chat(ctx context.Context, msgs []Message, tools []ToolSpec) (*R
 	if len(ts) > 0 {
 		body["tools"] = ts
 	}
+	return body
+}
+
+func (o *Ollama) chat(ctx context.Context, body map[string]any) (*Response, error) {
 	var out struct {
 		Message         ollamaMsg `json:"message"`
 		PromptEvalCount int       `json:"prompt_eval_count"`

@@ -50,6 +50,10 @@ type oaiMsg struct {
 }
 
 func (o *OpenAICompat) Chat(ctx context.Context, msgs []Message, tools []ToolSpec) (*Response, error) {
+	return o.chat(ctx, o.body(msgs, tools))
+}
+
+func (o *OpenAICompat) body(msgs []Message, tools []ToolSpec) map[string]any {
 	om := make([]oaiMsg, 0, len(msgs))
 	for _, m := range msgs {
 		content := m.Content
@@ -79,6 +83,10 @@ func (o *OpenAICompat) Chat(ctx context.Context, msgs []Message, tools []ToolSpe
 		body["tools"] = ts
 		body["tool_choice"] = "auto"
 	}
+	return body
+}
+
+func (o *OpenAICompat) chat(ctx context.Context, body map[string]any) (*Response, error) {
 	var out struct {
 		Choices []struct {
 			Message struct {

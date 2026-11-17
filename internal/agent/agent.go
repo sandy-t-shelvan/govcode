@@ -33,6 +33,10 @@ type Config struct {
 	// PlanMode starts read-only: only exploration tools and propose_plan
 	// are offered until PlanReviewer approves a plan.
 	PlanMode bool
+	// OnToken, if set and the backend streams, receives model text as it is
+	// generated, one complete line at a time. Each line passes the spillage
+	// check before it is released.
+	OnToken func(string)
 }
 
 // PlanReviewer is the human who approves the plan in plan mode.
@@ -155,7 +159,16 @@ func (a *Agent) Run(ctx context.Context, task string, rc RepoContext) (*Result, 
 		}
 		m.ContextTrims += trims
 		t0 := time.Now()
-		resp, err := a.Backend.Chat(ctx, fitted, specs)
+		var resp *llm.Response
+		streamed := false
+		if st, ok := a.Backend.(llm.Streamer); ok && a.Cfg.OnToken != nil {
+			lb := &lineBuffer{emit: a.Cfg.OnToken, check: func(l string) bool { return env.Spill("streamed model output", l) }}
+			resp, err = st.ChatStream(ctx, fitted, specs, lb.write)
+			lb.flush()
+			streamed = true
+		} else {
+			resp, err = a.Backend.Chat(ctx, fitted, specs)
+		}
 		m.ModelTime += time.Since(t0)
 		if err != nil {
 			m.StopReason = "model_error"
@@ -177,7 +190,7 @@ func (a *Agent) Run(ctx context.Context, task string, rc RepoContext) (*Result, 
 		}
 		a.Rec.Record("model_response", map[string]any{"turn": m.Turns, "content": recorded, "tool_calls": calls,
 			"usage": resp.Usage, "finish_reason": resp.FinishReason, "model": a.Backend.ModelName()})
-		if strings.TrimSpace(content) != "" {
+		if strings.TrimSpace(content) != "" && !streamed {
 			a.logf("\n%s\n", strings.TrimSpace(content))
 		}
 
@@ -325,6 +338,47 @@ func (a *Agent) execute(ctx context.Context, c *llm.ToolCall, specs map[string]l
 		a.logf("%s\n", indent(out))
 	}
 	return out, true
+}
+
+// lineBuffer releases streamed text one complete line at a time, after the
+// line passes check (the spillage guard). A withheld line is replaced.
+type lineBuffer struct {
+	emit  func(string)
+	check func(string) bool // true = withhold
+	buf   strings.Builder
+}
+
+func (b *lineBuffer) write(s string) {
+	for {
+		i := strings.IndexByte(s, '\n')
+		if i < 0 {
+			b.buf.WriteString(s)
+			return
+		}
+		b.buf.WriteString(s[:i+1])
+		b.release()
+		s = s[i+1:]
+	}
+}
+
+func (b *lineBuffer) release() {
+	line := b.buf.String()
+	b.buf.Reset()
+	if line == "" {
+		return
+	}
+	if b.check(line) {
+		b.emit("[withheld: classification marking above repository level]\n")
+		return
+	}
+	b.emit(line)
+}
+
+func (b *lineBuffer) flush() {
+	if b.buf.Len() > 0 {
+		b.buf.WriteByte('\n')
+		b.release()
+	}
 }
 
 func stripThinking(s string) string {

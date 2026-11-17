@@ -1,57 +1,28 @@
 # Roadmap and ticket plan
 
-This mirrors the Jira plan: one epic per phase, with stories under each. Status reflects this branch.
+Mirrors Jira project **GOV**: one epic per phase, one story per feature. Each story is built on a feature branch and merged through a PR once every CI gate passes (see CONTRIBUTING.md).
 
-## Phase 1: Local model pipeline (epic)
-| Story | Status |
-|---|---|
-| P1.1 Remove all cloud providers; loopback-only network guard | Done: `internal/netguard`; the OpenCode provider SDKs were removed |
-| P1.2 Ollama native + OpenAI-compatible (vLLM/llama.cpp) backends with explicit num_ctx | Done: `internal/llm`; num_ctx is required and sent on every Ollama request |
-| P1.3 Reliable tool calling (fallback parsing, JSON repair, schema validation) | Done: Qwen3-Coder XML, Hermes, Mistral and JSON-block recovery; coercion; model-readable errors |
-| P1.4 Model staging: quantize, SHA-pinned signed artifacts, AI-BOM, Modelfile + vLLM config | Done in code: real revision and SHA-256 pins. **Staging not yet run** (needs a low-side host with about 80 GB of disk) |
-| P1.5 Tool-call success eval on 10 real legacy-code tasks | Harness, tasks and validated scoring done. **Target-model run pending on GPU hardware** |
-
-## Phase 2: Agent loop on legacy code (epic)
-| Story | Status |
-|---|---|
-| P2.1 Repo-jailed tools sized for local models (list/search/read/outline/edit/create) | Done |
-| P2.2 Byte-exact edits: COBOL columns, tabs, CRLF; recovery from copied line numbers | Done |
-| P2.3 Plan → edit → test → fix loop with test gate on finish | Done |
-| P2.4 Context budgeting for fixed num_ctx | Done |
-| P2.5 Per-run git worktree; works with any on-prem remote | Done |
-| P2.6 bubblewrap sandbox: no network, worktree-only writes | Done |
-| P2.7 Large-repo scale test (≥ 1M LOC) | Todo: measure `search`/`list_files` latency and outline accuracy on a real program |
-
-## Phase 3: Signed audit log (epic)
-| Story | Status |
-|---|---|
-| P3.1 Hash-chained, Ed25519-signed entries; content-addressed objects | Done |
-| P3.2 verify: modification, deletion, reorder, impersonation, object tamper | Done |
-| P3.3 Truncation detection through commit anchors | Done |
-| P3.4 chattr +a enforcement; classification on every entry | Done |
-| P3.5 Periodic head export to WORM/SIEM | Todo |
-
-## Phase 4: SBOM and signed supply chain (epic)
-| Story | Status |
-|---|---|
-| P4.1 Stdlib-only, offline, reproducible build | Done (verified twice-build identical) |
-| P4.2 CycloneDX 1.6 SBOM + AI-BOM | Done |
-| P4.3 Signed release manifest; runtime self-verification (fail closed) | Done |
-| P4.4 Build-time no-hidden-network test | Done |
-| P4.5 FIPS 140-3 build | Done (`GOFIPS140=v1.0.0`); CMVP status to be confirmed by the reviewer |
-
-## Phase 5: Human approval and access control (epic)
-| Story | Status |
-|---|---|
-| P5.1 Root-owned policy binding one repo, approvers, sandbox, trust roots | Done |
-| P5.2 Signed proposals; target branch never touched by the agent | Done |
-| P5.3 Two-person approval with integrity checks and tty confirmation | Done |
-| P5.4 uid-bound keyring | Done |
-| P5.5 Multi-user acceptance test (`scripts/e2e/two-person.sh`) | Written, **not yet run** (creates OS users; run it on a disposable VM) |
-| P5.6 PIV/CAC or HSM signer via PKCS#11 | Todo |
+| Epic | Story | Status |
+|---|---|---|
+| GOV-1 Local model pipeline | GOV-6 network guard, GOV-7 backends + num_ctx, GOV-8 tool-call recovery | Done |
+| | GOV-9 model staging | Code done; **staging run pending** (low-side host, about 80 GB) |
+| | GOV-10 10-task eval | Harness done, scoring validated; **target-model run pending on GPU** |
+| GOV-2 Agent loop on legacy code | (phase 1–5 PR) | Done; large-repo scale test outstanding |
+| GOV-3 Signed audit log | (phase 1–5 PR) | Done; WORM export covered by GOV-30 |
+| GOV-4 SBOM / supply chain | (phase 1–5 PR) | Done |
+| GOV-5 Approval and access control | (phase 1–5 PR) | Done; multi-user e2e script to run on a VM; hardware signer GOV-31 |
+| GOV-11 SDLC and CI gates | GOV-15 CI gates, GOV-16 fuzzing, GOV-17 PR process | Done (PR #2). Fuzzing found 2 bugs; govulncheck found 36 vulnerabilities in Go 1.24.7, fixed by moving to 1.27.4 |
+| GOV-12 Agent features | GOV-18 permission rules | Done (PR #3) |
+| | GOV-19 plan mode, GOV-20 hooks, GOV-21 project memory | Done (PR #4) |
+| | GOV-23 streaming | Done (PR #6) |
+| | GOV-22 resume and checkpoints | **To do** |
+| GOV-13 VS Code | GOV-24 serve --stdio, GOV-25 panel, GOV-26 review, GOV-27 VSIX | Done (PR #5); **not yet tried in a real VS Code** |
+| GOV-14 Classified hardening | GOV-28 spillage guard, GOV-29 secret scan | Done (PR #3) |
+| | GOV-30 SIEM export | Done (PR #6) |
+| | GOV-31 PIV/CAC signing | **To do** (needs smart-card hardware to test) |
 
 ## The 1-week proof
-1. Day 1–2: low-side staging of Qwen3-Coder-30B-A3B Q4_K_M; transfer; `govcode model verify`.
-2. Day 2: install per DEPLOYMENT.md; `govcode verify` all PASS; run `scripts/e2e/two-person.sh` on a scratch VM.
-3. Day 3: `govcode eval` on Qwen3-Coder and Devstral. Go/no-go: ≥ 95% valid tool calls and ≥ 7/10 tasks passed.
-4. Day 4–5: real tickets on the customer's own repository through run → review → approve, with `audit verify` at the end of each day.
+1. **Day 1–2:** stage Qwen3-Coder-30B-A3B Q4_K_M on the low side, transfer it, run `govcode model verify`.
+2. **Day 2:** install per DEPLOYMENT.md; `govcode verify` must be all PASS. Run `scripts/e2e/two-person.sh` on a scratch VM, and install the VSIX in VS Code.
+3. **Day 3:** run `govcode eval` on Qwen3-Coder and on Devstral. Go/no-go: ≥ 95% valid tool calls and ≥ 7/10 tasks passed.
+4. **Day 4–5:** real tickets on the customer repository through plan → run → review → approve, from the CLI and from VS Code. Run `govcode audit verify` daily and confirm the events arrive in the SIEM.

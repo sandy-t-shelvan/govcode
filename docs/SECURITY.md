@@ -56,6 +56,19 @@
 - **Site hooks** (`hooks.post_edit`, `hooks.pre_proposal`): checks the ISSO defines, such as cppcheck or GNAT style. They are defined **only** in the root-owned policy, never in the repository. They run in the same sandbox as other commands, with `GOVCODE_CHANGED_FILES` set. A failing post-edit check is reported back to the model so it can fix the problem. A failing pre-proposal check marks the proposal `blocked`. Every run and its output is audit-logged. Examples are in `deploy/hooks/`.
 - **Project memory**: `site_instructions` (a root-owned file named in policy), then the repository's root `GOVCODE.md`, both loaded into the task prompt. A subdirectory's `GOVCODE.md` is added the first time the model reads a file there. The total is capped at about an eighth of `num_ctx`. Each file's SHA-256 is audit-logged, each passes the spillage check, and a `GOVCODE.md` change the model makes goes through normal proposal review.
 
+### 2e. SIEM export and streaming
+- **SIEM** (`siem.syslog: true`): security events go to the local syslog socket `/dev/log` (a Unix datagram socket, not the network) as RFC 5424 records with structured data under `govcode@32473`:
+
+  | Severity | Events |
+  |---|---|
+  | Critical | Spillage, failed `audit verify` |
+  | Warning | Secret found, refused or failed approval |
+  | Notice | Denied permission, failed site check |
+  | Info | Task, proposal, approval, landing, rejection |
+
+  Each record carries the user, uid, session, audit sequence and hash, and classification, but never code, prompts or model output. Your rsyslog or journald forwarding takes it from there. Export fails open (warn once), because the signed audit log stays authoritative. The build-time network test allows `internal/siem` Unix-domain sockets only.
+- **Streaming**: model text is shown as it is generated, but released one complete line at a time, and each line passes the spillage check first. An over-classified line is replaced, never displayed.
+
 ### 3. Attribution and provenance (audit log)
 - Every model request and response, tool call and result, command and its output, test run, proposal, approval, rejection and landing is an entry.
 - Entry hash = SHA-256 over the canonical JSON of the entry, which includes `prev`, the previous entry's hash. The entry is signed with Ed25519 by the acting user's key. Large content goes to a content-addressed object store referenced by hash.

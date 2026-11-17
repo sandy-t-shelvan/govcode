@@ -20,6 +20,7 @@ import (
 	"github.com/sandy-t-shelvan/govcode/internal/modelpin"
 	"github.com/sandy-t-shelvan/govcode/internal/policy"
 	"github.com/sandy-t-shelvan/govcode/internal/proposal"
+	"github.com/sandy-t-shelvan/govcode/internal/siem"
 	"github.com/sandy-t-shelvan/govcode/internal/sign"
 	"github.com/sandy-t-shelvan/govcode/internal/supply"
 	"github.com/sandy-t-shelvan/govcode/internal/tools"
@@ -37,6 +38,7 @@ type App struct {
 	Model    *modelpin.Model
 	Out      io.Writer
 	Warnings []string
+	siemExp  *siem.Exporter
 }
 
 // KeyPath is the invoking user's private signing key.
@@ -254,7 +256,7 @@ func (a *App) Backend() (llm.Backend, error) {
 }
 
 func (a *App) Session(id string) *audit.Session {
-	return &audit.Session{Log: a.Log, Signer: a.Signer, Actor: a.User, ID: id}
+	return &audit.Session{Log: a.Log, Signer: a.Signer, Actor: a.User, ID: id, OnRecord: a.forward}
 }
 
 // TTYApprover asks the human at the controlling terminal. It reads

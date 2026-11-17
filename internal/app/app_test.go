@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sandy-t-shelvan/govcode/internal/audit"
 	"github.com/sandy-t-shelvan/govcode/internal/identity"
@@ -173,5 +175,39 @@ func TestPolicyCanRequirePlanMode(t *testing.T) {
 	p, err := a.Run(context.Background(), RunOptions{Task: "set port", Backend: m, PlanReviewer: rv})
 	if err != nil || rv.n != 1 || p.Status != proposal.StatusReady {
 		t.Fatalf("err=%v reviews=%d proposal=%+v", err, rv.n, p)
+	}
+}
+
+func TestSIEMExportCarriesNoContent(t *testing.T) {
+	a := world(t)
+	sock := filepath.Join(t.TempDir(), "log")
+	l, err := net.ListenUnixgram("unixgram", &net.UnixAddr{Name: sock, Net: "unixgram"})
+	if err != nil {
+		t.Skip("unixgram unavailable")
+	}
+	defer l.Close()
+	a.Policy.SIEM = policy.SIEM{Syslog: true, Socket: sock}
+	if _, err := a.Run(context.Background(), RunOptions{Task: "add the db password", Backend: edit(`int port = 1;
+static const char *db_password = "Tr0ub4dor&3x";`)}); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	buf := make([]byte, 8192)
+	for {
+		l.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
+		n, _, err := l.ReadFromUnix(buf)
+		if err != nil {
+			break
+		}
+		got = append(got, string(buf[:n]))
+	}
+	all := strings.Join(got, "\n")
+	for _, want := range []string{`event="task"`, `event="secret_found"`, `kind="password assignment"`, `event="proposal"`, `status="blocked"`, `classification="SECRET//NOFORN"`} {
+		if !strings.Contains(all, want) {
+			t.Errorf("missing %s in SIEM stream:\n%s", want, all)
+		}
+	}
+	if strings.Contains(all, "Tr0ub4dor") || strings.Contains(all, "add the db password") {
+		t.Fatalf("SIEM stream leaked content:\n%s", all)
 	}
 }

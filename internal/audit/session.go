@@ -20,6 +20,8 @@ type Session struct {
 	ID     string
 	mu     sync.Mutex
 	Err    error // first append failure; callers must stop on it
+	// OnRecord, if set, is called after each entry is appended (SIEM export).
+	OnRecord func(*Entry)
 }
 
 func (s *Session) Record(kind string, payload any) error {
@@ -51,6 +53,9 @@ func (s *Session) RecordEntry(kind string, payload any) (*Entry, error) {
 		s.Err = fmt.Errorf("audit append failed: %w", err)
 		return nil, s.Err
 	}
+	if s.OnRecord != nil {
+		s.OnRecord(e)
+	}
 	return e, nil
 }
 
@@ -63,7 +68,7 @@ func summarize(kind string, payload any) map[string]any {
 		return nil
 	}
 	out := map[string]any{}
-	for _, k := range []string{"turn", "tool", "call_id", "model", "proposal", "decision", "base", "head", "branch", "target", "commit", "reason", "finish_reason", "exit_code", "status", "task_sha256", "diff_sha256", "files", "approver", "proposer"} {
+	for _, k := range []string{"turn", "tool", "call_id", "model", "proposal", "decision", "base", "head", "branch", "target", "commit", "reason", "finish_reason", "exit_code", "status", "task_sha256", "diff_sha256", "files", "approver", "proposer", "where", "level", "repository_level", "kind", "file", "line", "rule", "subject", "stage", "passed"} {
 		if v, ok := m[k]; ok {
 			out[k] = v
 		}
