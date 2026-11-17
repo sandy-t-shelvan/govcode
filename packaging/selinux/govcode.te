@@ -1,0 +1,37 @@
+policy_module(govcode, 1.0.0)
+
+########################################
+# govcode runs in the invoking user's domain (it has no daemon and no
+# setuid component). This module labels its shared state and root-owned
+# configuration so that:
+#   - users may read the configuration and trust roots but never write them;
+#   - users may create and append to state (audit log, proposals, evidence,
+#     run state) but the policy itself is never writable by users.
+# The append-only property of the audit log is enforced by chattr +a and
+# checked by govcode; SELinux adds that other confined services cannot
+# touch govcode state at all.
+
+type govcode_conf_t;
+files_config_file(govcode_conf_t)
+
+type govcode_var_lib_t;
+files_type(govcode_var_lib_t)
+
+gen_require(`
+	type user_t, staff_t, sysadm_t, unconfined_t;
+')
+
+# Configuration: read-only for confined users.
+allow { user_t staff_t } govcode_conf_t:dir list_dir_perms;
+allow { user_t staff_t } govcode_conf_t:file read_file_perms;
+
+# Shared state: create, read, append and rename (atomic state saves).
+allow { user_t staff_t } govcode_var_lib_t:dir { create_dir_perms rw_dir_perms };
+allow { user_t staff_t } govcode_var_lib_t:file { create_file_perms rw_file_perms rename_file_perms };
+allow { user_t staff_t } govcode_var_lib_t:file lock;
+
+# Administrators and unconfined users manage both.
+allow { sysadm_t unconfined_t } govcode_conf_t:dir manage_dir_perms;
+allow { sysadm_t unconfined_t } govcode_conf_t:file manage_file_perms;
+allow { sysadm_t unconfined_t } govcode_var_lib_t:dir manage_dir_perms;
+allow { sysadm_t unconfined_t } govcode_var_lib_t:file manage_file_perms;

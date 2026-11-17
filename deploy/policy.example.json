@@ -165,5 +165,9 @@
       "GOVCODE.md"
     ],
     "timeout_seconds": 900
+  },
+  "host": {
+    "require_fips": true,
+    "require_selinux": true
   }
 }

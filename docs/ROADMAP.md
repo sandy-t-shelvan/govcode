@@ -26,7 +26,7 @@ Mirrors Jira project **GOV**: one epic per phase, one story per feature. Each st
 | | GOV-36 mandatory static analysis | Done (PR #10) |
 | | GOV-38 refuse pickle-format weights, staging malware scan | Done (PR #11) |
 | | GOV-37 `govcode ato` evidence package | Done (PR #12); **STIG Viewer 3 import of the .cklb not yet tried** |
-| | GOV-39 RHEL 8/9 packaging on a STIG-hardened, FIPS, SELinux-enforcing host | **To do** (needs a RHEL host) |
+| | GOV-39 RHEL 8/9 RPM, SELinux module, FIPS and SELinux preflight | Packaging built and CI-tested; **install on a STIG-hardened RHEL host with FIPS and SELinux enforcing not yet done** |
 
 ## The 1-week proof
 1. **Day 1–2:** stage Devstral-Small-2507 Q4_K_M (and Qwen3-Coder only if the AO grants an origin exception) on the low side, transfer it, run `govcode model verify`.

@@ -185,6 +185,9 @@ func Open(policyPath string, out io.Writer, needSigner bool) (*App, []Check, err
 	// Static analyzers: present, hashed, versioned
 	a.checkAnalyzers(add)
 
+	// Platform: FIPS mode and SELinux
+	a.checkHost(add)
+
 	// Sandbox availability
 	if _, err := tools.NewRunner(p.Sandbox.Mode, repo.Root, p.Sandbox.ExtraROPaths, p.Sandbox.Env); err != nil {
 		add("sandbox", "FAIL", err.Error())
@@ -409,7 +412,7 @@ func checkProvenance(path string, keyPaths []string) (string, string, string) {
 // Some failures are fatal even in warn mode.
 func isAlwaysFatal(name string) bool {
 	switch name {
-	case "signing key", "audit log", "sandbox", "num_ctx", "served model digest", "model origin", "build provenance", "static analysis", "model format", "model scan":
+	case "signing key", "audit log", "sandbox", "num_ctx", "served model digest", "model origin", "build provenance", "static analysis", "model format", "model scan", "host FIPS", "SELinux":
 		return true
 	}
 	return false
