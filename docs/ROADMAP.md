@@ -19,14 +19,14 @@ Mirrors Jira project **GOV**: one epic per phase, one story per feature. Each st
 | GOV-13 VS Code | GOV-24 serve --stdio, GOV-25 panel, GOV-26 review, GOV-27 VSIX | Done (PR #5); **not yet tried in a real VS Code** |
 | GOV-14 Classified hardening | GOV-28 spillage guard, GOV-29 secret scan | Done (PR #3) |
 | | GOV-30 SIEM export | Done (PR #6) |
-| | GOV-31 PIV/CAC signing | **To do** (needs smart-card hardware to test) |
+| | GOV-31 PIV/CAC signing (PKCS#11, site CA, hardware approvers) | Done (PR #17); tested with SoftHSM2 in CI; **physical CAC not yet tried** |
 | GOV-32 Classified deployment readiness | GOV-33 Devstral default + model-origin policy | Done (PR #7) |
 | | GOV-34 SLSA v1 / in-toto build provenance | Done (PR #8) |
 | | GOV-35 per-change AI evidence record | Done (PR #9) |
 | | GOV-36 mandatory static analysis | Done (PR #10) |
 | | GOV-38 refuse pickle-format weights, staging malware scan | Done (PR #11) |
 | | GOV-37 `govcode ato` evidence package | Done (PR #12); **STIG Viewer 3 import of the .cklb not yet tried** |
-| | GOV-39 RHEL 8/9 RPM, SELinux module, FIPS and SELinux preflight | Packaging built and CI-tested; **install on a STIG-hardened RHEL host with FIPS and SELinux enforcing not yet done** |
+| | GOV-39 RHEL 8/9 RPM, SELinux module, FIPS and SELinux preflight | Packaging merged (PR #16); **install on a STIG-hardened RHEL host with FIPS and SELinux enforcing not yet done** |
 
 ## The 1-week proof
 1. **Day 1–2:** stage Devstral-Small-2507 Q4_K_M (and Qwen3-Coder only if the AO grants an origin exception) on the low side, transfer it, run `govcode model verify`.
