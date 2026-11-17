@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/sandy-t-shelvan/govcode/internal/audit"
+	"github.com/sandy-t-shelvan/govcode/internal/evidence"
 	"github.com/sandy-t-shelvan/govcode/internal/gitx"
 	"github.com/sandy-t-shelvan/govcode/internal/identity"
 	"github.com/sandy-t-shelvan/govcode/internal/keyring"
@@ -40,6 +41,7 @@ type App struct {
 	// OriginException is set when the selected model's origin is denied
 	// but the policy records an AO exception for it; every task records it.
 	OriginException *policy.OriginException
+	Evidence        evidence.Store
 	Out             io.Writer
 	Warnings        []string
 	siemExp         *siem.Exporter
@@ -212,6 +214,7 @@ func Open(policyPath string, out io.Writer, needSigner bool) (*App, []Check, err
 		add("audit log", st, a.Log.LogPath()+" is not chattr +a")
 	}
 	a.Store = proposal.Store{Dir: filepath.Join(p.StateDir, "proposals")}
+	a.Evidence = evidence.Store{Dir: filepath.Join(p.StateDir, "evidence")}
 
 	for _, c := range checks {
 		if c.Status == "FAIL" && (p.Strict() || isAlwaysFatal(c.Name)) {
@@ -219,6 +222,78 @@ func Open(policyPath string, out io.Writer, needSigner bool) (*App, []Check, err
 		}
 	}
 	return a, checks, nil
+}
+
+// Land approves p: the approval goes into the audit log, then the signed
+// evidence record is written, then the merge commit lands carrying both
+// the audit anchor and the evidence hash. Authorization (approver list,
+// two-person rule, typed confirmation) must already have been done by the
+// caller; proposal.Store.Approve re-checks the approver.
+func (a *App) Land(p *proposal.Proposal, rules proposal.Rules, comment string) (*proposal.LandResult, error) {
+	sess := a.Session(p.ID)
+	anchor := func(kind string, payload map[string]any) (string, error) {
+		e, err := sess.RecordEntry(kind, payload)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%d:%s", e.Seq, e.Hash), nil
+	}
+	ev := func(tip, anc string) (string, error) {
+		r, err := evidence.Build(p, a.User, a.Signer.KeyID(), tip, anc, comment != "", time.Now())
+		if err != nil {
+			return "", err
+		}
+		sum, err := a.Evidence.Save(r, a.Signer)
+		if err != nil {
+			return "", err
+		}
+		sess.Record("evidence", map[string]any{"proposal": p.ID, "evidence_sha256": sum, "model": r.Model.ID})
+		return sum, nil
+	}
+	res, err := a.Store.Approve(a.Repo, rules, p, a.User, a.Signer, comment, anchor, ev)
+	if err != nil {
+		sess.Record("approval_failed", map[string]any{"proposal": p.ID, "error": err.Error()})
+		return nil, err
+	}
+	sess.Record("landed", map[string]any{"proposal": p.ID, "commit": res.Commit, "target": p.Target, "base": res.TargetWas, "evidence_sha256": res.Evidence})
+	return res, nil
+}
+
+// VerifyEvidence loads the evidence record for a proposal id or a landed
+// commit. For a commit, the record must hash to the commit's
+// Govcode-Evidence trailer. It then checks the approver's signature and
+// that the audit range the record cites is in the log.
+func (a *App) VerifyEvidence(ref string) (*evidence.Verified, error) {
+	id, want := ref, ""
+	if _, err := os.Stat(filepath.Join(a.Evidence.Dir, ref+".json")); err != nil {
+		out, gerr := a.Repo.Git("log", "-1", "--format=%(trailers:key=Govcode-Proposal,valueonly)%x00%(trailers:key="+evidence.Trailer+",valueonly)", ref, "--")
+		if gerr != nil {
+			return nil, fmt.Errorf("%s is neither a proposal with evidence nor a commit", ref)
+		}
+		pid, sum, _ := strings.Cut(out, "\x00")
+		id, want = strings.TrimSpace(pid), strings.TrimSpace(sum)
+		if id == "" || want == "" {
+			return nil, fmt.Errorf("commit %s has no %s trailer (not landed by govcode, or landed before evidence records)", ref, evidence.Trailer)
+		}
+	}
+	if strings.ContainsAny(id, "/\\") || strings.HasPrefix(id, ".") {
+		return nil, fmt.Errorf("bad proposal id")
+	}
+	v, err := a.Evidence.Load(id, a.Keyring, want)
+	if err != nil {
+		return nil, err
+	}
+	hashes := map[uint64]string{}
+	a.Log.Each(func(e *audit.Entry, _ []byte) error {
+		if e.Seq == v.Record.Audit.FirstSeq || e.Seq == v.Record.Audit.LastSeq {
+			hashes[e.Seq] = e.Hash
+		}
+		return nil
+	})
+	if err := evidence.CheckAudit(v.Record, func(s uint64) (string, bool) { h, ok := hashes[s]; return h, ok }); err != nil {
+		return nil, err
+	}
+	return v, nil
 }
 
 // checkOrigin applies model.allowed_origins / denied_origins to the model

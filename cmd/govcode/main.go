@@ -22,6 +22,7 @@ import (
 	"github.com/sandy-t-shelvan/govcode/internal/app"
 	"github.com/sandy-t-shelvan/govcode/internal/audit"
 	"github.com/sandy-t-shelvan/govcode/internal/eval"
+	"github.com/sandy-t-shelvan/govcode/internal/evidence"
 	"github.com/sandy-t-shelvan/govcode/internal/gitx"
 	"github.com/sandy-t-shelvan/govcode/internal/identity"
 	"github.com/sandy-t-shelvan/govcode/internal/keyring"
@@ -46,6 +47,8 @@ Approver (a different person when two_person_rule is on):
   govcode reject <id> -m reason   reject a proposal
 
 Audit:
+  govcode evidence <proposal|commit>           verify and print a landed change's AI evidence record
+  govcode evidence export -since YYYY-MM-DD [-until D] -o f   verified records for an ATO package
   govcode audit verify            verify hash chain, signatures, objects and git anchors
   govcode audit show [-n N] [-session ID]
   govcode audit object <sha256>   print a stored payload
@@ -108,6 +111,8 @@ func main() {
 		err = cmdAIBOM(args)
 	case "sign":
 		err = cmdSign(args)
+	case "evidence":
+		err = cmdEvidence(args)
 	case "provenance":
 		err = cmdProvenance(args)
 	case "attest":
@@ -300,20 +305,11 @@ func cmdApprove(args []string) error {
 	} else if !app.ConfirmTTY(prompt, "approve") {
 		return errors.New("not confirmed; nothing landed")
 	}
-	sess := a.Session(p.ID)
-	res, err := a.Store.Approve(a.Repo, rules, p, a.User, a.Signer, *comment, func(kind string, payload map[string]any) (string, error) {
-		e, err := sess.RecordEntry(kind, payload)
-		if err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("%d:%s", e.Seq, e.Hash), nil
-	})
+	res, err := a.Land(p, rules, *comment)
 	if err != nil {
-		sess.Record("approval_failed", map[string]any{"proposal": p.ID, "error": err.Error()})
 		return err
 	}
-	sess.Record("landed", map[string]any{"proposal": p.ID, "commit": res.Commit, "target": p.Target, "base": res.TargetWas})
-	fmt.Printf("Landed %s on %s as %s (audit anchor %s)\n", p.ID, p.Target, res.Commit[:12], res.Anchor[:20])
+	fmt.Printf("Landed %s on %s as %s (audit anchor %s, evidence %s)\n", p.ID, p.Target, res.Commit[:12], res.Anchor[:20], res.Evidence[:16])
 	return nil
 }
 
@@ -891,5 +887,96 @@ func cmdAttest(args []string) error {
 	if pt == supply.SLSAProvenanceType {
 		fmt.Printf("      built by %s from %s@%s (reproducible=%v)\n", r.Builder, r.Source, r.Commit, r.Repro)
 	}
+	return nil
+}
+
+func cmdEvidence(args []string) error {
+	if len(args) > 0 && args[0] == "export" {
+		return cmdEvidenceExport(args[1:])
+	}
+	fs, pol := flags("evidence")
+	pos := parse(fs, args)
+	if len(pos) != 1 {
+		return errors.New("usage: govcode evidence <proposal-id|commit> | govcode evidence export -since YYYY-MM-DD -o file")
+	}
+	a, checks, err := app.Open(*pol, os.Stdout, false)
+	if err != nil {
+		printChecks(checks)
+		return err
+	}
+	banner(a)
+	v, err := a.VerifyEvidence(pos[0])
+	if err != nil {
+		return err
+	}
+	r := v.Record
+	fmt.Printf("PASS  evidence %s for %s\n", v.SHA256, r.Proposal)
+	fmt.Printf("      signed by approver %s (key %s); audit %d:%.12s .. %d:%.12s present in the log\n",
+		r.Approver.Username, r.Approver.KeyID, r.Audit.FirstSeq, r.Audit.FirstHash, r.Audit.LastSeq, r.Audit.LastHash)
+	fmt.Printf("      model %s (%s, origin %s) num_ctx=%d temperature=%g\n\n", r.Model.ID, r.Model.Publisher, strings.Join(r.Model.Origins, ","), r.Model.NumCtx, r.Model.Temperature)
+	b, _ := json.MarshalIndent(r, "", "  ")
+	fmt.Println(string(b))
+	return nil
+}
+
+func cmdEvidenceExport(args []string) error {
+	fs, pol := flags("evidence export")
+	since := fs.String("since", "", "first approval date, YYYY-MM-DD (inclusive)")
+	until := fs.String("until", "", "last approval date, YYYY-MM-DD (inclusive; default today)")
+	out := fs.String("o", "", "output file")
+	parse(fs, args)
+	if *since == "" || *out == "" {
+		return errors.New("usage: govcode evidence export -since YYYY-MM-DD [-until YYYY-MM-DD] -o file")
+	}
+	from, err := time.Parse("2006-01-02", *since)
+	if err != nil {
+		return fmt.Errorf("-since: %w", err)
+	}
+	to := time.Now().UTC()
+	if *until != "" {
+		if to, err = time.Parse("2006-01-02", *until); err != nil {
+			return fmt.Errorf("-until: %w", err)
+		}
+	}
+	to = to.Truncate(24 * time.Hour).Add(24 * time.Hour)
+	a, checks, err := app.Open(*pol, os.Stdout, false)
+	if err != nil {
+		printChecks(checks)
+		return err
+	}
+	ids, err := a.Evidence.List()
+	if err != nil {
+		return err
+	}
+	type item struct {
+		SHA256 string           `json:"sha256"`
+		Record *evidence.Record `json:"record"`
+	}
+	exp := struct {
+		Schema         string `json:"schema"`
+		Classification string `json:"classification"`
+		Generated      string `json:"generated"`
+		Since          string `json:"since"`
+		Until          string `json:"until"`
+		Records        []item `json:"records"`
+	}{Schema: "govcode.evidence.export/v1", Classification: a.Policy.Classification, Generated: time.Now().UTC().Format(time.RFC3339),
+		Since: from.Format("2006-01-02"), Until: to.Add(-time.Second).Format("2006-01-02"), Records: []item{}}
+	for _, id := range ids {
+		v, err := a.VerifyEvidence(id)
+		if err != nil {
+			return fmt.Errorf("%s: %w (export stopped; nothing written)", id, err)
+		}
+		at, _ := time.Parse(time.RFC3339, v.Record.ApprovedAt)
+		if at.Before(from) || !at.Before(to) {
+			continue
+		}
+		exp.Records = append(exp.Records, item{v.SHA256, v.Record})
+	}
+	if err := writeJSON(*out, exp); err != nil {
+		return err
+	}
+	sum, _, _ := modelpin.HashFile(*out)
+	fmt.Printf("== %s ==\nwrote %s: %d verified record(s), sha256 %s\nThe export is classified at %s; handle it like the audit log.\n",
+		a.Policy.Classification, *out, len(exp.Records), sum, a.Policy.Classification)
 	return nil
 }

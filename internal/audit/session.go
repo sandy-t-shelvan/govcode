@@ -68,7 +68,7 @@ func summarize(kind string, payload any) map[string]any {
 		return nil
 	}
 	out := map[string]any{}
-	for _, k := range []string{"turn", "tool", "call_id", "model", "proposal", "decision", "base", "head", "branch", "target", "commit", "reason", "finish_reason", "exit_code", "status", "task_sha256", "diff_sha256", "files", "approver", "proposer", "where", "level", "repository_level", "kind", "file", "line", "rule", "subject", "stage", "passed", "model_publisher", "model_origin", "origin_exception", "model_digest", "num_ctx"} {
+	for _, k := range []string{"turn", "tool", "call_id", "model", "proposal", "decision", "base", "head", "branch", "target", "commit", "reason", "finish_reason", "exit_code", "status", "task_sha256", "diff_sha256", "files", "approver", "proposer", "where", "level", "repository_level", "kind", "file", "line", "rule", "subject", "stage", "passed", "evidence_sha256", "model_publisher", "model_origin", "origin_exception", "model_digest", "num_ctx"} {
 		if v, ok := m[k]; ok {
 			out[k] = v
 		}
