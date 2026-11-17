@@ -64,7 +64,39 @@ type Proposal struct {
 	Blocked        []string      `json:"blocked,omitempty"` // reasons, location and kind only
 	AuditSession   string        `json:"audit_session"`
 	AuditTaskSeq   uint64        `json:"audit_task_seq"`
+	AuditTaskHash  string        `json:"audit_task_hash,omitempty"`
 	Metrics        any           `json:"metrics,omitempty"`
+	// Evidence inputs, recorded at run time and copied into the evidence
+	// record when the proposal lands.
+	ModelInfo  *ModelInfo `json:"model_info,omitempty"`
+	PlanSHA256 string     `json:"plan_sha256,omitempty"`
+	Checks     []Check    `json:"checks,omitempty"`
+}
+
+// ModelInfo identifies exactly which model produced a change.
+type ModelInfo struct {
+	ID              string   `json:"id"`
+	Name            string   `json:"name,omitempty"`
+	Publisher       string   `json:"publisher,omitempty"`
+	Origins         []string `json:"origins,omitempty"` // model then lineage
+	UpstreamRepo    string   `json:"upstream_repo,omitempty"`
+	UpstreamRev     string   `json:"upstream_revision,omitempty"`
+	Quantization    string   `json:"quantization,omitempty"`
+	ArtifactSHA256  []string `json:"artifact_sha256,omitempty"`
+	ServedName      string   `json:"served_name"`
+	OllamaDigest    string   `json:"ollama_digest,omitempty"`
+	NumCtx          int      `json:"num_ctx"`
+	MaxTokens       int      `json:"max_tokens"`
+	Temperature     float64  `json:"temperature"`
+	Seed            int      `json:"seed,omitempty"`
+	OriginException string   `json:"origin_exception,omitempty"`
+}
+
+// Check is the result of one gate the change went through.
+type Check struct {
+	Name   string `json:"name"`
+	Result string `json:"result"` // pass | fail | skipped
+	Detail string `json:"detail,omitempty"`
 }
 
 type Decision struct {
@@ -270,13 +302,19 @@ type LandResult struct {
 	Commit    string
 	TargetWas string
 	Anchor    string
+	Evidence  string // SHA-256 of the evidence record, if one was made
 	FastPath  bool
 }
+
+// Evidencer is called after the approval is in the audit log and before
+// the merge commit. It writes the evidence record and returns its SHA-256,
+// which becomes the Govcode-Evidence trailer. A failure lands nothing.
+type Evidencer func(targetTip, anchor string) (string, error)
 
 // Approve lands p on its target branch. Order matters: authorization and
 // integrity checks, then the audit entry (so a landed commit always has a
 // matching log entry), then the merge commit and an atomic ref update.
-func (s Store) Approve(repo *gitx.Repo, r Rules, p *Proposal, approver identity.User, signer sign.Signer, comment string, anchor Anchorer) (*LandResult, error) {
+func (s Store) Approve(repo *gitx.Repo, r Rules, p *Proposal, approver identity.User, signer sign.Signer, comment string, anchor Anchorer, evidence Evidencer) (*LandResult, error) {
 	if p.Status != StatusReady {
 		return nil, fmt.Errorf("proposal %s is %s; only ready proposals (agent finished, tests passed) can be approved", p.ID, p.Status)
 	}
@@ -316,7 +354,13 @@ func (s Store) Approve(repo *gitx.Repo, r Rules, p *Proposal, approver identity.
 	if err != nil {
 		return nil, fmt.Errorf("audit append failed; nothing landed: %w", err)
 	}
-	msg := commitMessage(p, approver, anc, r.Classification, comment)
+	var ev string
+	if evidence != nil {
+		if ev, err = evidence(tip, anc); err != nil {
+			return nil, fmt.Errorf("evidence record failed; nothing landed: %w", err)
+		}
+	}
+	msg := commitMessage(p, approver, anc, ev, r.Classification, comment)
 	author := gitx.Author{Name: p.Proposer.Username, Email: p.Proposer.Username + "@" + p.Proposer.Host}
 	committer := gitx.Author{Name: approver.Username, Email: approver.Username + "@" + approver.Host}
 	commit, err := repo.CommitTree(tree, []string{tip, p.Head}, msg, author, committer)
@@ -334,7 +378,7 @@ func (s Store) Approve(repo *gitx.Repo, r Rules, p *Proposal, approver identity.
 		Time: time.Now().UTC().Format(time.RFC3339), Reason: comment, Commit: commit, AuditAnchor: anc}, signer); err != nil {
 		return nil, err
 	}
-	return &LandResult{Commit: commit, TargetWas: tip, Anchor: anc, FastPath: tip == p.Base}, nil
+	return &LandResult{Commit: commit, TargetWas: tip, Anchor: anc, Evidence: ev, FastPath: tip == p.Base}, nil
 }
 
 func (s Store) Reject(r Rules, p *Proposal, by identity.User, signer sign.Signer, reason string, anchor Anchorer) error {
@@ -356,10 +400,11 @@ func (s Store) Reject(r Rules, p *Proposal, by identity.User, signer sign.Signer
 }
 
 const (
-	TrailerAnchor = "Govcode-Audit-Anchor"
+	TrailerAnchor   = "Govcode-Audit-Anchor"
+	TrailerEvidence = "Govcode-Evidence"
 )
 
-func commitMessage(p *Proposal, approver identity.User, anchor, classification, comment string) string {
+func commitMessage(p *Proposal, approver identity.User, anchor, evidence, classification, comment string) string {
 	title := strings.TrimSpace(strings.SplitN(p.Task, "\n", 2)[0])
 	if len(title) > 68 {
 		title = title[:68] + "…"
@@ -379,6 +424,9 @@ func commitMessage(p *Proposal, approver identity.User, anchor, classification, 
 	fmt.Fprintf(&b, "Govcode-Diff-SHA256: %s\n", p.DiffSHA256)
 	fmt.Fprintf(&b, "Govcode-Tests: %s (passed=%v)\n", p.Tests.Command, p.Tests.Passed)
 	fmt.Fprintf(&b, "Govcode-Classification: %s\n", classification)
+	if evidence != "" {
+		fmt.Fprintf(&b, "%s: %s\n", TrailerEvidence, evidence)
+	}
 	fmt.Fprintf(&b, "%s: %s\n", TrailerAnchor, anchor)
 	return b.String()
 }

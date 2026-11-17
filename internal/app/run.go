@@ -134,11 +134,14 @@ func (a *App) Run(ctx context.Context, o RunOptions) (*proposal.Proposal, error)
 		p.Classification, a.User, id, modelID, backend.Options().NumCtx, runner.Sandboxed())
 	ag := &agent.Agent{Backend: backend, Tools: tools.NewSet(env), Rec: sess,
 		Cfg: agent.Config{MaxTurns: p.MaxTurns, Out: a.Out, Verbose: o.Verbose, PlanMode: planMode, OnToken: o.OnToken}}
+	var plan *planHasher
 	if planMode {
-		ag.PlanReviewer = o.PlanReviewer
-		if ag.PlanReviewer == nil {
-			ag.PlanReviewer = &TTYPlanReviewer{}
+		inner := o.PlanReviewer
+		if inner == nil {
+			inner = &TTYPlanReviewer{}
 		}
+		plan = &planHasher{inner: inner}
+		ag.PlanReviewer = plan
 	}
 	start := time.Now()
 	res, runErr := ag.Run(ctx, o.Task, agent.RepoContext{Summary: gitx.Summary(wt), TestCommand: p.Tests.Command, Memory: memory})
@@ -205,11 +208,16 @@ func (a *App) Run(ctx context.Context, o RunOptions) (*proposal.Proposal, error)
 	if len(blocked) > 0 {
 		status = proposal.StatusBlocked
 	}
+	checks := a.runChecks(env, runner.Sandboxed(), maxLevel, blocked, hookReport)
 	prop := &proposal.Proposal{ID: id, Created: time.Now().UTC().Format(time.RFC3339), Classification: p.Classification,
 		Repo: a.Repo.Root, Task: o.Task, TaskSHA256: hex.EncodeToString(th[:]), Summary: res.Summary, Proposer: a.User,
 		Target: p.TargetBranch, Branch: branch, Base: base, Head: head, DiffSHA256: proposal.DiffHash(diff), Files: files,
 		Tests: proposal.Tests{Command: p.Tests.Command, Runs: env.TestRuns, Passed: env.LastTestPass},
-		Model: modelID, ModelDigest: digest, Status: status, Blocked: blocked, AuditSession: id, AuditTaskSeq: taskEntry.Seq, Metrics: res.Metrics}
+		Model: modelID, ModelDigest: digest, Status: status, Blocked: blocked, AuditSession: id, AuditTaskSeq: taskEntry.Seq, AuditTaskHash: taskEntry.Hash, Metrics: res.Metrics,
+		ModelInfo: a.modelInfo(backend), Checks: checks}
+	if plan != nil {
+		prop.PlanSHA256 = plan.sha
+	}
 	if err := a.Store.Save(prop, diff, a.Signer); err != nil {
 		return nil, err
 	}
@@ -268,4 +276,81 @@ func errString(e error) string {
 		return ""
 	}
 	return e.Error()
+}
+
+// planHasher passes plan review through and keeps the SHA-256 of the plan
+// the human approved, for the evidence record.
+type planHasher struct {
+	inner agent.PlanReviewer
+	sha   string
+}
+
+func (h *planHasher) ReviewPlan(steps []string, summary string) (bool, string) {
+	ok, fb := h.inner.ReviewPlan(steps, summary)
+	if ok {
+		sum := sha256.Sum256([]byte(summary + "\n" + strings.Join(steps, "\n")))
+		h.sha = hex.EncodeToString(sum[:])
+	}
+	return ok, fb
+}
+
+// modelInfo describes the model that produced the change: the signed lock
+// entry when there is one, plus the generation settings actually used.
+func (a *App) modelInfo(b llm.Backend) *proposal.ModelInfo {
+	o := b.Options()
+	mi := &proposal.ModelInfo{ID: b.ModelName(), ServedName: b.ModelName(), NumCtx: o.NumCtx, MaxTokens: o.MaxTokens, Temperature: o.Temperature, Seed: o.Seed}
+	if m := a.Model; m != nil {
+		mi.ID, mi.Name, mi.Publisher, mi.Origins = m.ID, m.Name, m.Publisher, m.Origins()
+		mi.UpstreamRepo, mi.UpstreamRev, mi.Quantization = m.Upstream.Repo, m.Upstream.Revision, m.Artifact.Quant
+		mi.OllamaDigest = m.Serve.OllamaDigest
+		for _, f := range m.Artifact.Files {
+			mi.ArtifactSHA256 = append(mi.ArtifactSHA256, f.SHA256)
+		}
+	}
+	if e := a.OriginException; e != nil {
+		mi.OriginException = e.Reference + " (" + e.AuthorizedBy + ", expires " + e.Expires + ")"
+	}
+	return mi
+}
+
+// runChecks summarises the gates the change went through. Values are
+// results and counts only.
+func (a *App) runChecks(env *tools.Env, sandboxed bool, maxLevel marking.Level, blocked []string, hookReport string) []proposal.Check {
+	res := func(ok bool) string {
+		if ok {
+			return "pass"
+		}
+		return "fail"
+	}
+	count := func(prefix string) int {
+		n := 0
+		for _, b := range blocked {
+			if strings.HasPrefix(b, prefix) {
+				n++
+			}
+		}
+		return n
+	}
+	p := a.Policy
+	var cs []proposal.Check
+	if p.Tests.Command != "" {
+		cs = append(cs, proposal.Check{Name: "tests", Result: res(env.LastTestPass), Detail: fmt.Sprintf("%s (%d runs)", p.Tests.Command, env.TestRuns)})
+	}
+	if maxLevel == marking.Unknown {
+		cs = append(cs, proposal.Check{Name: "spillage_guard", Result: "skipped", Detail: "disabled by policy"})
+	} else {
+		cs = append(cs, proposal.Check{Name: "spillage_guard", Result: res(count("spillage:") == 0), Detail: "ceiling " + maxLevel.String()})
+	}
+	n := count("secret:")
+	cs = append(cs, proposal.Check{Name: "secret_scan", Result: res(n == 0), Detail: fmt.Sprintf("%d finding(s)", n)})
+	for _, h := range p.Hooks.PreProposal {
+		ok := !strings.Contains(hookReport, fmt.Sprintf("%q failed", h))
+		cs = append(cs, proposal.Check{Name: "site_check: " + h, Result: res(ok)})
+	}
+	sb := "none"
+	if sandboxed {
+		sb = "bubblewrap"
+	}
+	cs = append(cs, proposal.Check{Name: "sandbox", Result: res(sandboxed || p.Sandbox.Mode != "required"), Detail: sb})
+	return cs
 }

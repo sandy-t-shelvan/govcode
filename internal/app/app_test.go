@@ -110,7 +110,7 @@ static const char *db_password = "Tr0ub4dor&3x";`)})
 	if strings.Contains(strings.Join(p.Blocked, ""), "Tr0ub4dor") {
 		t.Fatal("secret value leaked into the proposal record")
 	}
-	if _, err := a.Store.Approve(a.Repo, proposal.Rules{}, p, identity.User{UID: 99999, Username: "other"}, a.Signer, "", nil); err == nil {
+	if _, err := a.Store.Approve(a.Repo, proposal.Rules{}, p, identity.User{UID: 99999, Username: "other"}, a.Signer, "", nil, nil); err == nil {
 		t.Fatal("blocked proposal approved")
 	}
 }
@@ -331,5 +331,56 @@ func TestBuildProvenancePreflight(t *testing.T) {
 	otherPub := filepath.Join(dir, "wrong.pub")
 	if _, _, err := openWorld(t, trust(wrongSubject, otherPub)); err == nil || !strings.Contains(err.Error(), "not a subject") {
 		t.Fatalf("provenance without this binary accepted: %v", err)
+	}
+}
+
+func TestLandWritesVerifiableEvidence(t *testing.T) {
+	a := world(t)
+	p, err := a.Run(context.Background(), RunOptions{Task: "set port to 2 SECRETTASKTEXT", Backend: edit("int port = 2;")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.ModelInfo == nil || p.AuditTaskHash == "" || len(p.Checks) == 0 {
+		t.Fatalf("proposal lacks evidence inputs: %+v", p)
+	}
+	res, err := a.Land(p, proposal.Rules{Classification: a.Policy.Classification}, "looks right")
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg, _ := a.Repo.Git("log", "-1", "--format=%B", res.Commit)
+	if !strings.Contains(msg, "Govcode-Evidence: "+res.Evidence) {
+		t.Fatalf("no evidence trailer:\n%s", msg)
+	}
+	v, err := a.VerifyEvidence(res.Commit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := v.Record
+	if r.Proposal != p.ID || r.TaskSHA256 != p.TaskSHA256 || r.DiffSHA256 != p.DiffSHA256 || r.Audit.LastSeq <= r.Audit.FirstSeq {
+		t.Fatalf("%+v", r)
+	}
+	var names []string
+	for _, c := range r.Checks {
+		names = append(names, c.Name+"="+c.Result)
+	}
+	if got := strings.Join(names, ","); !strings.Contains(got, "secret_scan=pass") || !strings.Contains(got, "spillage_guard=pass") || !strings.Contains(got, "tests=pass") {
+		t.Errorf("checks %s", got)
+	}
+	raw, _ := os.ReadFile(filepath.Join(a.Evidence.Dir, p.ID+".json"))
+	if strings.Contains(string(raw), "SECRETTASKTEXT") || strings.Contains(string(raw), "int port") {
+		t.Fatal("evidence record contains task text or code")
+	}
+	if _, err := a.VerifyEvidence(p.ID); err != nil {
+		t.Errorf("by proposal id: %v", err)
+	}
+	// Replacing the record (even with a validly signed one) breaks the trailer binding.
+	f := filepath.Join(a.Evidence.Dir, p.ID+".json")
+	os.Chmod(f, 0o644)
+	os.WriteFile(f, append(raw, ' '), 0o644)
+	if _, err := a.VerifyEvidence(res.Commit); err == nil || !strings.Contains(err.Error(), "trailer says") {
+		t.Errorf("altered evidence accepted: %v", err)
+	}
+	if _, err := a.VerifyEvidence("main~1"); err == nil {
+		t.Error("commit without evidence trailer accepted")
 	}
 }

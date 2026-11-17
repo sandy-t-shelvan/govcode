@@ -89,6 +89,7 @@ For a classified deployment (strict mode, two-person rule, root-owned policy and
 | `govcode proposals` / `review <id>` | anyone | Lists proposals; shows a summary, test result, integrity check, audit trail and diff. |
 | `govcode approve <id> [-m]` / `reject <id> -m` | approver | Lands or rejects a proposal. |
 | `govcode audit verify \| show \| object` | anyone | Verifies or inspects the log. |
+| `govcode evidence <commit\|proposal>` / `evidence export` | assessor | Verifies a landed change's signed AI evidence record (model, settings, checks, people, audit range); exports a date range for the ATO package. |
 | `govcode verify` | anyone | Runs every preflight check and prints PASS/WARN/FAIL. |
 | `govcode keygen [--register]` | each user | Creates your Ed25519 key in `~/.config/govcode/signing.key` (mode 0600). |
 | `govcode sbom`, `aibom`, `manifest`, `sign` | release engineer | Supply-chain artifacts. |

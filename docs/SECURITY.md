@@ -77,6 +77,16 @@
 - `chattr +a` (checked through the `FS_IOC_GETFLAGS` ioctl) makes the log append-only even for its owner. `audit.require_append_only` makes govcode refuse to run without it.
 - Every entry carries the policy's classification marking. **The log and its objects are classified at the level of the code they record.** They contain prompts, code and diffs. Store, back up, mark and destroy them accordingly. Nothing in them leaves the host.
 
+### 3a. Per-change AI evidence record
+- When a proposal lands, govcode writes `<state_dir>/evidence/<proposal>.json`, signed by the approver. The record holds:
+  - the model: lock id, publisher, origin and lineage, upstream revision, quantization, artifact SHA-256s, Ollama digest, and `num_ctx`, `max_tokens`, temperature and seed as used;
+  - the task SHA-256, the approved plan's SHA-256 (plan mode), the files changed and the diff SHA-256;
+  - each gate and its result: tests, spillage guard, secret scan, every site check, sandbox;
+  - proposer and approver (uid and key id), timestamps, and the audit range from the task entry to the approval entry, by sequence number and hash.
+- The record holds hashes and references only, never code, prompts or model text. It is still classified at the repository's level, because it describes classified work.
+- The landed commit carries `Govcode-Evidence: <sha256>`. The evidence is written after the approval audit entry and before the merge commit; if writing it fails, nothing lands.
+- `govcode evidence <commit|proposal>` checks the trailer hash, the approver's uid-bound signature, and that both cited audit entries are in the log with the cited hashes. `govcode evidence export -since … -o …` writes every verified record in a date range for the ATO package, and stops if any record fails.
+
 ### 4. Supply chain
 See [SUPPLY_CHAIN.md](SUPPLY_CHAIN.md). In strict mode the binary refuses to start unless its own SHA-256 is in a manifest signed by a trusted release key, the model lock signature verifies, and the model Ollama serves has the pinned manifest digest.
 

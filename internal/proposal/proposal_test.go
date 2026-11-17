@@ -100,7 +100,7 @@ var rules = Rules{TwoPersonRule: true, Approvers: []string{"bob"}, Classificatio
 func TestSelfApprovalRefused(t *testing.T) {
 	w := setup(t)
 	p := w.propose(t, "a.c", "int a = 2;\n")
-	_, err := w.store.Approve(w.repo, Rules{TwoPersonRule: true, Approvers: []string{"bob", w.alice.Username}}, p, w.alice, w.aliceS, "", w.anchor)
+	_, err := w.store.Approve(w.repo, Rules{TwoPersonRule: true, Approvers: []string{"bob", w.alice.Username}}, p, w.alice, w.aliceS, "", w.anchor, nil)
 	if !errors.Is(err, ErrSelfApproval) {
 		t.Fatalf("self-approval: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestNonApproverRefused(t *testing.T) {
 	w := setup(t)
 	p := w.propose(t, "a.c", "int a = 2;\n")
 	carol := identity.User{UID: 9999, Username: "carol"}
-	if _, err := w.store.Approve(w.repo, rules, p, carol, w.bobS, "", w.anchor); err == nil || !strings.Contains(err.Error(), "not an approver") {
+	if _, err := w.store.Approve(w.repo, rules, p, carol, w.bobS, "", w.anchor, nil); err == nil || !strings.Contains(err.Error(), "not an approver") {
 		t.Fatalf("carol: %v", err)
 	}
 }
@@ -122,7 +122,7 @@ func TestApproveLandsWithProvenance(t *testing.T) {
 	w := setup(t)
 	p := w.propose(t, "a.c", "int a = 2;\n")
 	before, _ := w.repo.RevParse("refs/heads/main")
-	res, err := w.store.Approve(w.repo, rules, p, w.bob, w.bobS, "LGTM", w.anchor)
+	res, err := w.store.Approve(w.repo, rules, p, w.bob, w.bobS, "LGTM", w.anchor, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +151,7 @@ func TestApproveLandsWithProvenance(t *testing.T) {
 	}
 	// decided exactly once
 	p2, _ := w.store.Load(p.ID, w.kr)
-	if _, err := w.store.Approve(w.repo, rules, p2, w.bob, w.bobS, "", w.anchor); err == nil {
+	if _, err := w.store.Approve(w.repo, rules, p2, w.bob, w.bobS, "", w.anchor, nil); err == nil {
 		t.Fatal("approved twice")
 	}
 }
@@ -164,7 +164,7 @@ func TestTamperedBranchRefused(t *testing.T) {
 	git(t, w.repo.Root, "worktree", "add", "-q", wt, p.Branch)
 	os.WriteFile(filepath.Join(wt, "b.c"), []byte("int b = 666;\n"), 0o644)
 	git(t, wt, "commit", "-qam", "sneaky")
-	if _, err := w.store.Approve(w.repo, rules, p, w.bob, w.bobS, "", w.anchor); err == nil || !strings.Contains(err.Error(), "moved") {
+	if _, err := w.store.Approve(w.repo, rules, p, w.bob, w.bobS, "", w.anchor, nil); err == nil || !strings.Contains(err.Error(), "moved") {
 		t.Fatalf("tampered branch: %v", err)
 	}
 }
@@ -185,7 +185,7 @@ func TestOnlyReadyProposalsLand(t *testing.T) {
 	w := setup(t)
 	p := w.propose(t, "a.c", "int a = 2;\n")
 	p.Status = StatusTestsFailed
-	if _, err := w.store.Approve(w.repo, rules, p, w.bob, w.bobS, "", w.anchor); err == nil {
+	if _, err := w.store.Approve(w.repo, rules, p, w.bob, w.bobS, "", w.anchor, nil); err == nil {
 		t.Fatal("tests_failed proposal approved")
 	}
 }
@@ -195,16 +195,16 @@ func TestTargetMovedCleanMergeAndConflict(t *testing.T) {
 	p1 := w.propose(t, "a.c", "int a = 2;\n")
 	p2 := w.propose(t, "b.c", "int b = 2;\n") // independent file
 	p3 := w.propose(t, "a.c", "int a = 3;\n") // conflicts with p1
-	if _, err := w.store.Approve(w.repo, rules, p1, w.bob, w.bobS, "", w.anchor); err != nil {
+	if _, err := w.store.Approve(w.repo, rules, p1, w.bob, w.bobS, "", w.anchor, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := w.store.Approve(w.repo, rules, p2, w.bob, w.bobS, "", w.anchor); err != nil {
+	if _, err := w.store.Approve(w.repo, rules, p2, w.bob, w.bobS, "", w.anchor, nil); err != nil {
 		t.Fatalf("clean merge onto moved target failed: %v", err)
 	}
 	if got := git(t, w.repo.Root, "show", "main:a.c") + git(t, w.repo.Root, "show", "main:b.c"); got != "int a = 2;int b = 2;" {
 		t.Errorf("merged content %q", got)
 	}
-	if _, err := w.store.Approve(w.repo, rules, p3, w.bob, w.bobS, "", w.anchor); err == nil || !strings.Contains(err.Error(), "no longer merges") {
+	if _, err := w.store.Approve(w.repo, rules, p3, w.bob, w.bobS, "", w.anchor, nil); err == nil || !strings.Contains(err.Error(), "no longer merges") {
 		t.Fatalf("conflicting proposal: %v", err)
 	}
 }
@@ -219,7 +219,7 @@ func TestRejectAndWithdraw(t *testing.T) {
 	if p.Status != StatusRejected {
 		t.Fatal("status not rejected")
 	}
-	if _, err := w.store.Approve(w.repo, rules, p, w.bob, w.bobS, "", w.anchor); err == nil {
+	if _, err := w.store.Approve(w.repo, rules, p, w.bob, w.bobS, "", w.anchor, nil); err == nil {
 		t.Fatal("rejected proposal approved")
 	}
 }
