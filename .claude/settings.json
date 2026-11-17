@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__Atlassian_MCP__addOrEditJiraIssueComment",
+      "mcp__Atlassian_MCP__transitionJiraIssue",
+      "mcp__Atlassian_MCP__createJiraIssue",
+      "mcp__github__create_pull_request",
+      "mcp__github__merge_pull_request"
+    ]
+  }
+}
