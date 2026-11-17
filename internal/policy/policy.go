@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/sandy-t-shelvan/govcode/internal/analysis"
 	"github.com/sandy-t-shelvan/govcode/internal/marking"
 	"github.com/sandy-t-shelvan/govcode/internal/modelpin"
 	"github.com/sandy-t-shelvan/govcode/internal/netguard"
@@ -106,6 +107,23 @@ type Hooks struct {
 	PreProposal []string `json:"pre_proposal"`
 }
 
+// Analysis is the mandatory static analysis gate. Every file a proposal
+// changes must be covered by an analyzer or match UnanalyzedOK; analyzers
+// run sandboxed before the proposal is saved and block it on failure.
+type Analysis struct {
+	Required       bool                `json:"required"` // forced on in strict mode
+	Analyzers      []analysis.Analyzer `json:"analyzers"`
+	UnanalyzedOK   []string            `json:"unanalyzed_ok"` // path globs, e.g. "docs/**", "**/*.md"
+	TimeoutSeconds int                 `json:"timeout_seconds"`
+}
+
+func (a Analysis) Timeout() time.Duration {
+	if a.TimeoutSeconds <= 0 {
+		return 10 * time.Minute
+	}
+	return time.Duration(a.TimeoutSeconds) * time.Second
+}
+
 // SIEM exports security events to the local syslog socket.
 type SIEM struct {
 	Syslog bool   `json:"syslog"`
@@ -140,12 +158,13 @@ type Policy struct {
 	Hooks         Hooks `json:"hooks"`
 	// SiteInstructions is a root-owned file of site-wide conventions loaded
 	// into every task prompt, before the repository's GOVCODE.md.
-	SiteInstructions    string  `json:"site_instructions,omitempty"`
-	RequirePlanApproval bool    `json:"require_plan_approval,omitempty"`
-	SIEM                SIEM    `json:"siem"`
-	Sandbox             Sandbox `json:"sandbox"`
-	Trust               Trust   `json:"trust"`
-	Audit               Audit   `json:"audit"`
+	SiteInstructions    string   `json:"site_instructions,omitempty"`
+	RequirePlanApproval bool     `json:"require_plan_approval,omitempty"`
+	SIEM                SIEM     `json:"siem"`
+	Analysis            Analysis `json:"analysis"`
+	Sandbox             Sandbox  `json:"sandbox"`
+	Trust               Trust    `json:"trust"`
+	Audit               Audit    `json:"audit"`
 
 	Path string `json:"-"`
 }
@@ -257,6 +276,17 @@ func (p *Policy) validate() ([]string, error) {
 	}
 	if p.Strict() && !p.Model.Origins().Active() {
 		warn = append(warn, "no model.allowed_origins or model.denied_origins: any model in the signed lock may be used regardless of origin")
+	}
+	for _, an := range p.Analysis.Analyzers {
+		if err := an.Validate(); err != nil {
+			return nil, err
+		}
+	}
+	if p.Strict() {
+		p.Analysis.Required = true
+	}
+	if p.Analysis.Required && len(p.Analysis.Analyzers) == 0 {
+		warn = append(warn, "analysis is required but no analyzers are configured: only files matching analysis.unanalyzed_ok can be proposed")
 	}
 	switch p.Sandbox.Mode {
 	case "required", "best-effort":

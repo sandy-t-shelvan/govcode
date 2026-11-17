@@ -154,3 +154,14 @@ func headTail(s string, max int) string {
 	t := max - h
 	return s[:h] + fmt.Sprintf("\n\n[... %d bytes omitted ...]\n\n", len(s)-max) + s[len(s)-t:]
 }
+
+// SandboxVisible reports whether path is inside a directory the sandbox
+// binds (the system directories plus extra read-only paths).
+func SandboxVisible(path string, extra []string) bool {
+	for _, d := range append(append([]string{}, defaultRO...), extra...) {
+		if path == d || strings.HasPrefix(path, strings.TrimSuffix(d, "/")+"/") {
+			return true
+		}
+	}
+	return false
+}

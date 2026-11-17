@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sandy-t-shelvan/govcode/internal/analysis"
 	"github.com/sandy-t-shelvan/govcode/internal/audit"
 	"github.com/sandy-t-shelvan/govcode/internal/evidence"
 	"github.com/sandy-t-shelvan/govcode/internal/gitx"
@@ -42,6 +43,7 @@ type App struct {
 	// but the policy records an AO exception for it; every task records it.
 	OriginException *policy.OriginException
 	Evidence        evidence.Store
+	Analyzers       []analysis.Tool // resolved at preflight, in policy order
 	Out             io.Writer
 	Warnings        []string
 	siemExp         *siem.Exporter
@@ -160,6 +162,9 @@ func Open(policyPath string, out io.Writer, needSigner bool) (*App, []Check, err
 			add("served model digest", "PASS", a.Model.Serve.OllamaName+" "+a.Model.Serve.OllamaDigest)
 		}
 	}
+
+	// Static analyzers: present, hashed, versioned
+	a.checkAnalyzers(add)
 
 	// Sandbox availability
 	if _, err := tools.NewRunner(p.Sandbox.Mode, repo.Root, p.Sandbox.ExtraROPaths, p.Sandbox.Env); err != nil {
@@ -296,6 +301,40 @@ func (a *App) VerifyEvidence(ref string) (*evidence.Verified, error) {
 	return v, nil
 }
 
+// checkAnalyzers resolves every analyzer binary. A missing analyzer fails
+// preflight when analysis is required; the resolved path, SHA-256 and
+// version go into each run's audit entries and evidence record.
+func (a *App) checkAnalyzers(add func(name, status, detail string)) {
+	an := a.Policy.Analysis
+	if len(an.Analyzers) == 0 {
+		if an.Required {
+			add("static analysis", "WARN", "required, but no analyzers configured")
+		} else {
+			add("static analysis", "SKIP", "no analyzers configured")
+		}
+		return
+	}
+	st := "WARN"
+	if an.Required {
+		st = "FAIL"
+	}
+	a.Analyzers = nil
+	for _, x := range an.Analyzers {
+		t, err := analysis.Resolve(x)
+		if err != nil {
+			add("static analysis", st, err.Error())
+			a.Analyzers = append(a.Analyzers, analysis.Tool{Name: x.Name})
+			continue
+		}
+		if a.Policy.Sandbox.Mode != "off" && !tools.SandboxVisible(t.Path, a.Policy.Sandbox.ExtraROPaths) {
+			add("static analysis", st, fmt.Sprintf("analyzer %s at %s is not visible inside the sandbox; add its directory to sandbox.extra_ro_paths", x.Name, t.Path))
+		} else {
+			add("static analysis", "PASS", fmt.Sprintf("%s: %s (%s) sha256 %.16s", x.Name, t.Path, t.Version, t.SHA256))
+		}
+		a.Analyzers = append(a.Analyzers, t)
+	}
+}
+
 // checkOrigin applies model.allowed_origins / denied_origins to the model
 // and its lineage. A denial is fatal in every mode unless the policy holds an
 // unexpired AO exception naming this exact model.
@@ -350,7 +389,7 @@ func checkProvenance(path string, keyPaths []string) (string, string, string) {
 // Some failures are fatal even in warn mode.
 func isAlwaysFatal(name string) bool {
 	switch name {
-	case "signing key", "audit log", "sandbox", "num_ctx", "served model digest", "model origin", "build provenance":
+	case "signing key", "audit log", "sandbox", "num_ctx", "served model digest", "model origin", "build provenance", "static analysis":
 		return true
 	}
 	return false

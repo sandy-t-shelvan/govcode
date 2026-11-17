@@ -22,7 +22,9 @@
     "max_tokens": 4096,
     "temperature": 0.15,
     "verify_digest": true,
-    "denied_origins": ["CN"]
+    "denied_origins": [
+      "CN"
+    ]
   },
   "tests": {
     "command": "make test",
@@ -105,5 +107,63 @@
   "require_plan_approval": true,
   "siem": {
     "syslog": true
+  },
+  "analysis": {
+    "required": true,
+    "analyzers": [
+      {
+        "name": "cppcheck",
+        "extensions": [
+          ".c",
+          ".h"
+        ],
+        "command": "cppcheck --quiet --error-exitcode=1 --enable=warning,portability --inline-suppr --template={file}:{line}:{severity}:{id}:{message}",
+        "fail_on": ":(error|warning):",
+        "finding": ":(error|warning|style|portability|performance):"
+      },
+      {
+        "name": "clang-tidy",
+        "extensions": [
+          ".cpp",
+          ".cc",
+          ".cxx",
+          ".hpp",
+          ".hh"
+        ],
+        "command": "clang-tidy --quiet --checks=-*,clang-analyzer-*,bugprone-*,cert-* --warnings-as-errors=clang-analyzer-*,cert-*",
+        "fail_on": " error: ",
+        "finding": " (warning|error): "
+      },
+      {
+        "name": "gnat",
+        "extensions": [
+          ".adb",
+          ".ads"
+        ],
+        "command": "gcc -c -gnatc -gnatwa -gnatwe -gnaty3abcefhiklmnprt",
+        "fail_on": "(error|warning|\\(style\\))",
+        "version_args": [
+          "--version"
+        ]
+      },
+      {
+        "name": "cobc",
+        "extensions": [
+          ".cbl",
+          ".cob",
+          ".cpy"
+        ],
+        "command": "cobc -fsyntax-only -Wall",
+        "fail_on": "error:",
+        "finding": "(error|warning):"
+      }
+    ],
+    "unanalyzed_ok": [
+      "docs/**",
+      "**/*.md",
+      "**/Makefile",
+      "GOVCODE.md"
+    ],
+    "timeout_seconds": 900
   }
 }
