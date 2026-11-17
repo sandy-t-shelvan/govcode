@@ -21,7 +21,8 @@ import (
 //   - Granite:          <|tool_call|>[{"name":..., "arguments":{...}}]  (the marker is a special
 //     token that servers usually strip, so a bare JSON list is accepted when
 //     every NAME is a known tool)
-//   - JSON block:       ```json {"name":..., "arguments":{...}} ```  (only if NAME is a known tool)
+//   - JSON block:       ```json {"name":..., "arguments":{...}} ``` or a fenced list of those
+//     (only if every NAME is a known tool)
 func ExtractToolCalls(content string, tools []ToolSpec) ([]ToolCall, string) {
 	known := map[string]ToolSpec{}
 	for _, t := range tools {
@@ -202,8 +203,26 @@ func parseJSONBlocks(s string, known map[string]ToolSpec) ([]ToolCall, string) {
 	var calls []ToolCall
 	rest := s
 	try := func(raw string) bool {
+		fixed := RepairJSON(raw)
+		// A list of calls (Granite and others write one when they fall back
+		// to a code fence): every element must name a known tool.
+		if strings.HasPrefix(strings.TrimSpace(fixed), "[") {
+			var arr []nameArgs
+			if json.Unmarshal([]byte(fixed), &arr) != nil || len(arr) == 0 {
+				return false
+			}
+			for _, na := range arr {
+				if _, ok := known[na.Name]; !ok {
+					return false
+				}
+			}
+			for _, na := range arr {
+				calls = append(calls, na.toCall(SourceJSON))
+			}
+			return true
+		}
 		var na nameArgs
-		if json.Unmarshal([]byte(RepairJSON(raw)), &na) != nil {
+		if json.Unmarshal([]byte(fixed), &na) != nil {
 			return false
 		}
 		if _, ok := known[na.Name]; !ok {

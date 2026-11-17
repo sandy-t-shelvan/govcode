@@ -252,3 +252,28 @@ func TestGraniteRealMultiCall(t *testing.T) {
 		t.Errorf("new_text lost the C literal: %q", edit.NewText)
 	}
 }
+
+// A real Granite reply after a no-call nag: an arguments-only object (not a
+// call) and then the call as a fenced JSON list. Before, only fenced
+// objects were accepted and the edit was dropped.
+func TestFencedListRealGranite(t *testing.T) {
+	b, err := os.ReadFile("testdata/granite_fenced_list.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls, _ := ExtractToolCalls(string(b), []ToolSpec{{Name: "edit_file"}, {Name: "run_tests"}})
+	if len(calls) != 1 || calls[0].Name != "edit_file" || calls[0].Source != SourceJSON {
+		t.Fatalf("calls %+v", calls)
+	}
+	var a struct {
+		OldText string `json:"old_text"`
+	}
+	json.Unmarshal(calls[0].Args, &a)
+	if a.OldText != "strcpy(t->callsign, callsign);" {
+		t.Errorf("old_text %q", a.OldText)
+	}
+	// A fenced list with an unknown name is not a call.
+	if c, _ := ExtractToolCalls("```json\n[{\"name\":\"edit_file\",\"arguments\":{}},{\"name\":\"rm\",\"arguments\":{}}]\n```", []ToolSpec{{Name: "edit_file"}}); len(c) != 0 {
+		t.Errorf("unknown tool in list accepted: %+v", c)
+	}
+}
