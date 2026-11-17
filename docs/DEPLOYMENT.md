@@ -54,7 +54,7 @@ install -m 644 govcode-0.1.0/deploy/ollama/govcode-ollama.service /etc/systemd/s
 ```
 
 ```bash
-cd /opt/govcode/models && sudo -u ollama ollama create govcode-qwen3-coder:30b-q4km -f Modelfile.qwen3-coder-30b-a3b
+cd /opt/govcode/models && sudo -u ollama ollama create govcode-devstral:24b-q4km -f Modelfile.devstral-small-24b
 ```
 
 ```bash

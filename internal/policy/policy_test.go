@@ -75,3 +75,30 @@ func TestCheckRepo(t *testing.T) {
 		t.Fatal("repo restriction wrong")
 	}
 }
+
+func TestModelOriginValidation(t *testing.T) {
+	base := func() *Policy {
+		return Dev(t.TempDir(), filepath.Join(t.TempDir(), "state"), "u")
+	}
+	for name, tc := range map[string]struct {
+		mod  func(*Policy)
+		want string
+	}{
+		"lowercase code": {func(p *Policy) { p.Model.DeniedOrigins = []string{"cn"} }, "ISO 3166-1"},
+		"name not code":  {func(p *Policy) { p.Model.AllowedOrigins = []string{"France"} }, "ISO 3166-1"},
+		"exception incomplete": {func(p *Policy) {
+			p.Model.OriginException = &OriginException{ModelID: "q", AuthorizedBy: "AO"}
+		}, "needs model_id"},
+		"exception bad date": {func(p *Policy) {
+			p.Model.OriginException = &OriginException{ModelID: "q", AuthorizedBy: "AO", Reference: "r", Expires: "next year"}
+		}, "YYYY-MM-DD"},
+		"ok": {func(p *Policy) { p.Model.DeniedOrigins = []string{"CN", "RU"} }, ""},
+	} {
+		p := base()
+		tc.mod(p)
+		_, _, err := Load(write(t, p))
+		if tc.want == "" && err != nil || tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)) {
+			t.Errorf("%s: got %v want %q", name, err, tc.want)
+		}
+	}
+}

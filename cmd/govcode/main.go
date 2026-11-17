@@ -697,7 +697,7 @@ func cmdEval(ctx context.Context, args []string) error {
 	only := fs.String("only", "", "run only tasks whose id contains this")
 	backend := fs.String("backend", "ollama", "ollama | openai | oracle")
 	endpoint := fs.String("endpoint", "http://127.0.0.1:11434", "model server (loopback)")
-	model := fs.String("model", "govcode-qwen3-coder:30b-q4km", "served model name")
+	model := fs.String("model", "govcode-devstral:24b-q4km", "served model name")
 	numCtx := fs.Int("num-ctx", 32768, "context length (must match server)")
 	maxTok := fs.Int("max-tokens", 4096, "max output tokens per turn")
 	temp := fs.Float64("temperature", 0.2, "temperature")

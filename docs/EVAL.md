@@ -36,10 +36,10 @@ govcode model smoke
 Full eval against Ollama:
 
 ```bash
-govcode eval -backend ollama -endpoint http://127.0.0.1:11434 -model govcode-qwen3-coder:30b-q4km -num-ctx 32768
+govcode eval -backend ollama -endpoint http://127.0.0.1:11434 -model govcode-devstral:24b-q4km -num-ctx 32768 -temperature 0.15
 ```
 
-The same eval against Devstral on vLLM:
+The same eval against Devstral on vLLM (Qwen3-Coder works the same way where the AO has granted an origin exception):
 
 ```bash
 govcode eval -backend openai -endpoint http://127.0.0.1:8000/v1 -model devstral-small-24b -num-ctx 32768 -temperature 0.15

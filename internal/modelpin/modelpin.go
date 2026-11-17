@@ -46,16 +46,27 @@ type Serve struct {
 	OllamaDigest   string  `json:"ollama_manifest_digest"`
 }
 
+// Lineage names a model this one was derived from (fine-tuned, distilled
+// or merged), with the country of its publisher.
+type Lineage struct {
+	Model     string `json:"model"`
+	Publisher string `json:"publisher"`
+	Origin    string `json:"origin"`
+}
+
 type Model struct {
-	ID        string  `json:"id"`
-	Default   bool    `json:"default,omitempty"`
-	Name      string  `json:"name"`
-	License   string  `json:"license"`
-	Publisher string  `json:"publisher"`
-	Upstream  Source  `json:"upstream"`
-	Artifact  Source  `json:"artifact"`
-	Prequant  *Source `json:"reference_prequantized,omitempty"`
-	Serve     Serve   `json:"serve"`
+	ID        string `json:"id"`
+	Default   bool   `json:"default,omitempty"`
+	Name      string `json:"name"`
+	License   string `json:"license"`
+	Publisher string `json:"publisher"`
+	// Origin is the publisher's country as an ISO 3166-1 alpha-2 code.
+	Origin      string    `json:"origin"`
+	DerivedFrom []Lineage `json:"derived_from,omitempty"`
+	Upstream    Source    `json:"upstream"`
+	Artifact    Source    `json:"artifact"`
+	Prequant    *Source   `json:"reference_prequantized,omitempty"`
+	Serve       Serve     `json:"serve"`
 }
 
 type Lock struct {

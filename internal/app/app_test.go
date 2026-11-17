@@ -25,6 +25,16 @@ import (
 // returns an opened App.
 func world(t *testing.T) *App {
 	t.Helper()
+	a, checks, err := openWorld(t, nil)
+	if err != nil {
+		t.Fatalf("Open: %v %+v", err, checks)
+	}
+	return a
+}
+
+// openWorld is world with a hook to adjust the policy before Open.
+func openWorld(t *testing.T, tweak func(*policy.Policy)) (*App, []Check, error) {
+	t.Helper()
 	base := t.TempDir()
 	repo := filepath.Join(base, "repo")
 	os.MkdirAll(repo, 0o755)
@@ -39,6 +49,9 @@ func world(t *testing.T) *App {
 	p := policy.Dev(repo, filepath.Join(base, "state"), u.Username)
 	p.Classification = "SECRET//NOFORN"
 	p.Tests.Command = "make -s test"
+	if tweak != nil {
+		tweak(p)
+	}
 	b, _ := json.Marshal(p)
 	pol := filepath.Join(base, "policy.json")
 	os.WriteFile(pol, b, 0o644)
@@ -52,11 +65,7 @@ func world(t *testing.T) *App {
 	wd, _ := os.Getwd()
 	os.Chdir(repo)
 	t.Cleanup(func() { os.Chdir(wd) })
-	a, checks, err := Open(pol, io.Discard, true)
-	if err != nil {
-		t.Fatalf("Open: %v %+v", err, checks)
-	}
-	return a
+	return Open(pol, io.Discard, true)
 }
 
 func edit(newText string) *llm.Scripted {
@@ -210,4 +219,77 @@ static const char *db_password = "Tr0ub4dor&3x";`)}); err != nil {
 	if strings.Contains(all, "Tr0ub4dor") || strings.Contains(all, "add the db password") {
 		t.Fatalf("SIEM stream leaked content:\n%s", all)
 	}
+}
+
+// repoLock is resolved at start-up because openWorld changes directory.
+var repoLock, _ = filepath.Abs("../../models/models.lock.json")
+
+func useRepoLock(id string) func(*policy.Policy) {
+	return func(p *policy.Policy) {
+		lock := repoLock
+		p.Model.Lock, p.Model.ID = lock, id
+		p.Model.DeniedOrigins = []string{"CN"}
+	}
+}
+
+func TestDeniedModelOriginIsFatalEvenInWarnMode(t *testing.T) {
+	_, checks, err := openWorld(t, useRepoLock("qwen3-coder-30b-a3b"))
+	if err == nil || !strings.Contains(err.Error(), "model origin") || !strings.Contains(err.Error(), "origin CN is denied") {
+		t.Fatalf("want origin failure, got %v %+v", err, checks)
+	}
+}
+
+func TestAllowedModelOriginPasses(t *testing.T) {
+	a, checks, err := openWorld(t, useRepoLock("devstral-small-24b"))
+	if err != nil {
+		t.Fatalf("%v %+v", err, checks)
+	}
+	if !hasCheck(checks, "model origin", "PASS") || a.OriginException != nil {
+		t.Fatalf("%+v", checks)
+	}
+}
+
+func TestOriginExceptionIsWarnedAndAudited(t *testing.T) {
+	exc := func(expires string) func(*policy.Policy) {
+		return func(p *policy.Policy) {
+			useRepoLock("qwen3-coder-30b-a3b")(p)
+			p.Model.OriginException = &policy.OriginException{ModelID: "qwen3-coder-30b-a3b", AuthorizedBy: "AO Smith", Reference: "memo-117", Expires: expires}
+		}
+	}
+	if _, _, err := openWorld(t, exc("2020-01-01")); err == nil || !strings.Contains(err.Error(), "expired") {
+		t.Fatalf("expired exception accepted: %v", err)
+	}
+	a, checks, err := openWorld(t, exc(time.Now().AddDate(0, 1, 0).Format("2006-01-02")))
+	if err != nil {
+		t.Fatalf("%v %+v", err, checks)
+	}
+	if !hasCheck(checks, "model origin", "WARN") || a.OriginException == nil {
+		t.Fatalf("%+v", checks)
+	}
+	if _, err := a.Run(context.Background(), RunOptions{Task: "set port to 2", Backend: edit("int port = 2;")}); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	a.Log.Each(func(e *audit.Entry, _ []byte) error {
+		if e.Kind == "task" {
+			found = true
+			b, _ := json.Marshal(e.Summary)
+			if !strings.Contains(string(b), `"model_origin":"CN"`) || !strings.Contains(string(b), `"reference":"memo-117"`) {
+				t.Errorf("task entry lacks origin exception: %s", b)
+			}
+		}
+		return nil
+	})
+	if !found {
+		t.Fatal("no task entry")
+	}
+}
+
+func hasCheck(cs []Check, name, status string) bool {
+	for _, c := range cs {
+		if c.Name == name && c.Status == status {
+			return true
+		}
+	}
+	return false
 }

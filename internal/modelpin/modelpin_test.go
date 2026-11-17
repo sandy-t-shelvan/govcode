@@ -16,7 +16,7 @@ func TestRepoLockParses(t *testing.T) {
 		t.Fatal(err)
 	}
 	m, err := l.Find("")
-	if err != nil || m.ID != "qwen3-coder-30b-a3b" {
+	if err != nil || m.ID != "devstral-small-24b" {
 		t.Fatalf("default model: %v %v", m, err)
 	}
 	if m.Serve.NumCtx <= 0 {

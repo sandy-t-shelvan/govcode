@@ -2,6 +2,7 @@ package supply
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/sandy-t-shelvan/govcode/internal/modelpin"
 )
@@ -24,6 +25,16 @@ func AIBOM(l *modelpin.Lock) *BOM {
 			Licenses:  License(m.License),
 			ExternalRefs: []ExternalRef{{Type: "distribution", URL: "https://huggingface.co/" + m.Upstream.Repo + "/tree/" + m.Upstream.Revision,
 				Comment: "low-side source; never contacted from the high side"}},
+			Properties: []Property{{"govcode:origin", m.Origin}},
+		}
+		for _, d := range m.DerivedFrom {
+			// Lineage beyond the pinned upstream is recorded by name and
+			// origin; its weights are not shipped, so it carries no hashes.
+			up.Pedigree = appendAncestor(up.Pedigree, Component{
+				BOMRef: "model-lineage:" + d.Model, Type: "machine-learning-model", Name: d.Model, Publisher: d.Publisher,
+				Purl:       "pkg:huggingface/" + d.Model,
+				Properties: []Property{{"govcode:origin", d.Origin}, {"govcode:relationship", "derived_from"}},
+			})
 		}
 		for _, f := range m.Upstream.Files {
 			fc := Component{Type: "file", Name: f.Path, Properties: []Property{{"size", fmt.Sprint(f.Size)}}}
@@ -52,6 +63,8 @@ func AIBOM(l *modelpin.Lock) *BOM {
 				},
 			},
 			Properties: []Property{
+				{"govcode:origin", m.Origin},
+				{"govcode:lineage_origins", strings.Join(m.Origins(), ",")},
 				{"govcode:num_ctx", fmt.Sprint(m.Serve.NumCtx)},
 				{"govcode:max_tokens", fmt.Sprint(m.Serve.MaxTokens)},
 				{"govcode:ollama_name", m.Serve.OllamaName},
@@ -75,4 +88,12 @@ func AIBOM(l *modelpin.Lock) *BOM {
 		b.Dependencies = append(b.Dependencies, Dependency{Ref: served.BOMRef, DependsOn: []string{up.BOMRef}})
 	}
 	return b
+}
+
+func appendAncestor(p *Pedigree, c Component) *Pedigree {
+	if p == nil {
+		p = &Pedigree{}
+	}
+	p.Ancestors = append(p.Ancestors, c)
+	return p
 }

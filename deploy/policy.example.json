@@ -17,11 +17,12 @@
     "backend": "ollama",
     "endpoint": "http://127.0.0.1:11434",
     "lock": "/opt/govcode/models/models.lock.json",
-    "id": "qwen3-coder-30b-a3b",
+    "id": "devstral-small-24b",
     "num_ctx": 32768,
     "max_tokens": 4096,
-    "temperature": 0.2,
-    "verify_digest": true
+    "temperature": 0.15,
+    "verify_digest": true,
+    "denied_origins": ["CN"]
   },
   "tests": {
     "command": "make test",
