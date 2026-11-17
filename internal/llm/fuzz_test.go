@@ -65,3 +65,30 @@ func FuzzValidateArgs(f *testing.F) {
 		}
 	})
 }
+
+// A model server's reply to a streaming request is untrusted: whatever it
+// sends, the non-stream fallback must not panic, and a reply it accepts must
+// carry well-formed tool calls.
+func FuzzNonStreamReply(f *testing.F) {
+	for _, s := range []string{
+		`{"choices":[{"message":{"content":"x","tool_calls":[{"id":"c","type":"function","function":{"name":"read_file","arguments":"{\"path\":\"a\"}"}}]},"finish_reason":"tool_calls"}]}`,
+		`{"choices":[]}`, `{"error":{"message":"m"}}`, `{"choices":[{"message":{"tool_calls":[{"function":{"arguments":"not json"}}]}}]}`,
+		": ping", "<html>", "{", "",
+	} {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, s string) {
+		r, err := nonStreamReply(s, func(string) {})
+		if err != nil {
+			return
+		}
+		if r == nil {
+			t.Fatal("nil response without error")
+		}
+		for _, c := range r.ToolCalls {
+			if !json.Valid(c.Args) {
+				t.Fatalf("invalid args JSON %q from %q", c.Args, s)
+			}
+		}
+	})
+}

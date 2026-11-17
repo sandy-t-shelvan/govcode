@@ -151,8 +151,8 @@ func TestApproveLandsWithProvenance(t *testing.T) {
 	}
 	// decided exactly once
 	p2, _ := w.store.Load(p.ID, w.kr)
-	if _, err := w.store.Approve(w.repo, rules, p2, w.bob, w.bobS, "", w.anchor, nil); err == nil {
-		t.Fatal("approved twice")
+	if _, err := w.store.Approve(w.repo, rules, p2, w.bob, w.bobS, "", w.anchor, nil); err == nil || !strings.Contains(err.Error(), "already approved") {
+		t.Fatalf("approved twice: err = %v", err)
 	}
 }
 

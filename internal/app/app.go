@@ -166,6 +166,15 @@ func Open(policyPath string, out io.Writer, needSigner bool) (*App, []Check, err
 	cwd, _ := os.Getwd()
 	repo, err := gitx.Open(cwd)
 	if err != nil {
+		// Fall back to the granted repository only when cwd is not inside
+		// any work tree. A repository git refuses to open (another owner,
+		// a broken .git) must not be silently swapped for the policy's.
+		if top, inside := gitx.FindTop(cwd); inside {
+			if cerr := p.CheckRepo(top); cerr != nil {
+				return nil, nil, cerr
+			}
+			return nil, nil, err
+		}
 		repo, err = gitx.Open(p.RepoRoot)
 		if err != nil {
 			return nil, nil, err

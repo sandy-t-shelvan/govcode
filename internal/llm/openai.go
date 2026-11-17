@@ -87,24 +87,31 @@ func (o *OpenAICompat) body(msgs []Message, tools []ToolSpec) map[string]any {
 	return body
 }
 
+// oaiChatResponse is a non-streamed /chat/completions reply.
+type oaiChatResponse struct {
+	Choices []struct {
+		Message struct {
+			Content          *string       `json:"content"`
+			ReasoningContent *string       `json:"reasoning_content"`
+			ToolCalls        []oaiToolCall `json:"tool_calls"`
+		} `json:"message"`
+		FinishReason string `json:"finish_reason"`
+	} `json:"choices"`
+	Usage Usage `json:"usage"`
+	Error *struct {
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
 func (o *OpenAICompat) chat(ctx context.Context, body map[string]any) (*Response, error) {
-	var out struct {
-		Choices []struct {
-			Message struct {
-				Content          *string       `json:"content"`
-				ReasoningContent *string       `json:"reasoning_content"`
-				ToolCalls        []oaiToolCall `json:"tool_calls"`
-			} `json:"message"`
-			FinishReason string `json:"finish_reason"`
-		} `json:"choices"`
-		Usage Usage `json:"usage"`
-		Error *struct {
-			Message string `json:"message"`
-		} `json:"error"`
-	}
+	var out oaiChatResponse
 	if err := postJSON(ctx, o.client, o.BaseURL+"/chat/completions", body, &out); err != nil {
 		return nil, err
 	}
+	return out.response()
+}
+
+func (out *oaiChatResponse) response() (*Response, error) {
 	if out.Error != nil {
 		return nil, fmt.Errorf("model server: %s", out.Error.Message)
 	}
