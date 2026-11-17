@@ -102,7 +102,10 @@ What it shows:
   3. A fenced JSON list of calls was ignored. It is now accepted when every name is a known tool.
   4. The no-call nag did not repeat the model's format, so it kept answering in prose. It now does.
   5. An eval killed part-way lost every finished task. The report is now saved after every task.
-- **Not yet shown with a real model:** a `ready` proposal approved through `approve` and its `evidence` record. Four full `run` attempts on task 01 ended `incomplete` or with no change. The eval passed the same task twice, so this is model variance, not a pipeline fault. The approval path is covered by the scripted end-to-end tests; it still needs one real-model pass on the target hardware. On a host with no TTY, approval uses the dev-policy `--yes` path (`allow_non_interactive_approval`).
+- **The full path with a real model** (run, then a `ready` proposal, approve, landed commit, `audit verify`, `evidence`) was shown on the eighth full `run` attempt on task 01. All of it ran air-gapped in the same loopback-only namespace.
+  - Earlier attempts ended `incomplete`, at the turn limit, or with no tool call; that is model variance, since the eval passed this task twice. On the successful attempt, govcode refused three mismatched edits before Granite copied the text exactly.
+  - The run passed `make test` and the hidden checker, and landed with every `Govcode-*` trailer. `audit verify` passed with 293 entries and the evidence record verified.
+  - The fix is correct, but Granite put it on one line with the next statement. A human reviewer would likely send that back. Here approval used the dev-policy `--yes` path (`allow_non_interactive_approval`) because the host has no TTY, so nobody read the diff.
 
 ## Still to measure
 
