@@ -252,4 +252,4 @@ function activate(context) {
 
 function deactivate() { if (server) server.proc.kill(); }
 
-module.exports = { activate, deactivate, _internal: { ProposalsProvider, RevisionProvider, approve } };
+module.exports = { activate, deactivate, _internal: { ProposalsProvider, RevisionProvider, approve, ensureServer } };
