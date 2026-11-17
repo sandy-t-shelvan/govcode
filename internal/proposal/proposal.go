@@ -315,6 +315,9 @@ type Evidencer func(targetTip, anchor string) (string, error)
 // integrity checks, then the audit entry (so a landed commit always has a
 // matching log entry), then the merge commit and an atomic ref update.
 func (s Store) Approve(repo *gitx.Repo, r Rules, p *Proposal, approver identity.User, signer sign.Signer, comment string, anchor Anchorer, evidence Evidencer) (*LandResult, error) {
+	if p.Status == StatusApproved || p.Status == StatusRejected {
+		return nil, fmt.Errorf("proposal %s was already %s; a decided proposal cannot be approved again", p.ID, p.Status)
+	}
 	if p.Status != StatusReady {
 		return nil, fmt.Errorf("proposal %s is %s; only ready proposals (agent finished, tests passed) can be approved", p.ID, p.Status)
 	}

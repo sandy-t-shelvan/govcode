@@ -12,7 +12,8 @@ Mirrors Jira project **GOV**: one epic per phase, one story per feature. Each st
 | | GOV-42 large-repository scale test | Done: on Linux 6.6.60 (81,798 files) every tool answers in under 1.6 s and a full run takes about 20 s. A broad search was 5× slower than git grep; it now streams (DEPLOYMENT.md, "Large repositories") |
 | GOV-3 Signed audit log | (phase 1–5 PR) | Done; WORM export covered by GOV-30 |
 | GOV-4 SBOM / supply chain | (phase 1–5 PR) | Done |
-| GOV-5 Approval and access control | (phase 1–5 PR) | Done; multi-user e2e script to run on a VM; hardware signer GOV-31 |
+| GOV-5 Approval and access control | (phase 1–5 PR) | Done; hardware signer GOV-31 |
+| | GOV-41 multi-user two-person e2e | Done: `scripts/e2e/two-person.sh` passes 33/33 with real OS users and now runs in CI on every PR. Its first run found a silent no-tool-call on non-streaming servers and a repository-swap fallback, both fixed |
 | GOV-11 SDLC and CI gates | GOV-15 CI gates, GOV-16 fuzzing, GOV-17 PR process | Done (PR #2). Fuzzing found 2 bugs; govulncheck found 36 vulnerabilities in Go 1.24.7, fixed by moving to 1.27.4 |
 | GOV-12 Agent features | GOV-18 permission rules | Done (PR #3) |
 | | GOV-19 plan mode, GOV-20 hooks, GOV-21 project memory | Done (PR #4) |

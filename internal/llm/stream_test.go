@@ -78,3 +78,44 @@ func TestStreamHTTPError(t *testing.T) {
 }
 
 func mustQ(s string) string { b, _ := json.Marshal(s); return string(b) }
+
+// A server that ignores stream=true and answers with one ordinary JSON reply
+// (scripts/e2e/fake_model.py, some proxies) must still yield its tool calls,
+// not an empty turn that ends the run as "no tool call".
+func TestOpenAIStreamAcceptsNonStreamedReply(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"choices":[{"message":{"role":"assistant","content":"Reading.","tool_calls":[{"id":"c1","type":"function","function":{"name":"read_file","arguments":"{\"path\":\"track.c\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":12,"completion_tokens":3}}`)
+	}))
+	defer srv.Close()
+	o, _ := NewOpenAICompat(srv.URL+"/v1", "m", Options{NumCtx: 8192, MaxTokens: 100})
+	var got strings.Builder
+	r, err := o.ChatStream(context.Background(), nil, testTools, func(s string) { got.WriteString(s) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.ToolCalls) != 1 || r.ToolCalls[0].Name != "read_file" || string(r.ToolCalls[0].Args) != `{"path":"track.c"}` {
+		t.Fatalf("calls %+v", r.ToolCalls)
+	}
+	if r.Content != "Reading." || got.String() != "Reading." || r.Usage.PromptTokens != 12 || r.FinishReason != "tool_calls" {
+		t.Fatalf("%+v delta=%q", r, got.String())
+	}
+}
+
+func TestOpenAIStreamEmptyOrGarbageIsAnError(t *testing.T) {
+	for name, body := range map[string]string{
+		"empty":    "",
+		"comments": ": keep-alive\n\n",
+		"html":     "<html>proxy error</html>",
+		"error":    `{"error":{"message":"model not loaded"}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, body) }))
+			defer srv.Close()
+			o, _ := NewOpenAICompat(srv.URL+"/v1", "m", Options{NumCtx: 8192, MaxTokens: 100})
+			if r, err := o.ChatStream(context.Background(), nil, testTools, nil); err == nil {
+				t.Fatalf("no error; response %+v", r)
+			}
+		})
+	}
+}

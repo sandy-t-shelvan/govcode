@@ -115,12 +115,22 @@ func (o *OpenAICompat) ChatStream(ctx context.Context, msgs []Message, tools []T
 	calls := map[int]*partial{}
 	r := &Response{}
 	var content strings.Builder
+	// Some servers (and proxies) ignore stream=true and send one ordinary
+	// JSON reply. Keep the non-event text so that reply can still be read;
+	// without this the turn would look empty and end as "no tool call".
+	var other strings.Builder
+	events := 0
 	sc := scanner(rc)
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
 		if !strings.HasPrefix(line, "data:") {
+			if events == 0 && other.Len() < maxNonStreamReply {
+				other.WriteString(line)
+				other.WriteByte('\n')
+			}
 			continue
 		}
+		events++
 		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 		if data == "[DONE]" {
 			break
@@ -183,6 +193,9 @@ func (o *OpenAICompat) ChatStream(ctx context.Context, msgs []Message, tools []T
 	if err := sc.Err(); err != nil {
 		return nil, err
 	}
+	if events == 0 {
+		return nonStreamReply(other.String(), onDelta)
+	}
 	idx := make([]int, 0, len(calls))
 	for i := range calls {
 		idx = append(idx, i)
@@ -197,5 +210,30 @@ func (o *OpenAICompat) ChatStream(ctx context.Context, msgs []Message, tools []T
 		r.ToolCalls = append(r.ToolCalls, ToolCall{ID: id, Name: p.name, Args: normalizeArgs(json.RawMessage(p.args.String())), Source: SourceNative})
 	}
 	r.Content = content.String()
+	return r, nil
+}
+
+// maxNonStreamReply bounds the text kept while looking for SSE events.
+const maxNonStreamReply = 16 << 20
+
+// nonStreamReply reads a plain chat-completion JSON body that arrived in
+// answer to a streaming request. Anything else is an error: an empty or
+// unreadable stream must never pass for a model reply with no tool call.
+func nonStreamReply(raw string, onDelta func(string)) (*Response, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, fmt.Errorf("model stream: server sent no events")
+	}
+	var out oaiChatResponse
+	if !strings.HasPrefix(raw, "{") || json.Unmarshal([]byte(raw), &out) != nil {
+		return nil, fmt.Errorf("model stream: no events and not a chat completion: %s", truncate(raw, 200))
+	}
+	r, err := out.response()
+	if err != nil {
+		return nil, err
+	}
+	if onDelta != nil && r.Content != "" {
+		onDelta(r.Content)
+	}
 	return r, nil
 }

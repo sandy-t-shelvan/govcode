@@ -209,4 +209,4 @@ Every line must read PASS. Then run one proposal through to approval, and finish
 govcode audit verify
 ```
 
-For a full scripted acceptance test with three users, use `scripts/e2e/two-person.sh` on a **disposable** VM; it creates OS users. That script has not been run in the development environment. Run it as part of site acceptance.
+For a full scripted acceptance test with three users, use `scripts/e2e/two-person.sh` on a **disposable** VM; it creates OS users. It passes 33/33 in CI on every change (against a signed release, with bubblewrap and a `chattr +a` log). Run it again on the site host as part of site acceptance, because CI does not have your kernel, SELinux policy or FIPS mode.
