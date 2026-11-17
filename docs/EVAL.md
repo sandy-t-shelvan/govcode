@@ -62,6 +62,48 @@ A model whose chat template drops its tool-calling instruction when a system pro
 
 Suggested go/no-go for the one-week proof: **valid tool calls ≥ 95%** and **tasks passed ≥ 7/10** for the chosen model and quantization. If validity is high but executed-without-error is low, check the edit failures in the JSON before blaming the model.
 
-## Not yet measured
+## First real-model run: Granite 3.3 8B on CPU, air-gapped (GOV-40)
 
-The development container has no GPU and 15 GB of RAM, and its permissions did not allow building llama.cpp, so the target models have **not** been run there. The harness, the tasks and the scoring are complete and tested. The first real numbers come from running the commands above on the target hardware.
+> **These are not Devstral numbers.** This run proves the pipeline works end to end against a real local model with no network. It says little about how the target model will score. The development container has 4 vCPU, 15 GB RAM and no GPU, so Devstral-24B does not fit; an 8B model is the largest that does.
+
+| | |
+|---|---|
+| Model | IBM Granite-3.3-8B-Instruct, GGUF Q4_K_M (US origin, Apache-2.0; passes `denied_origins: ["CN"]`) |
+| Weights | `granite-3.3-8b-instruct-Q4_K_M.gguf`, 4,942,873,344 bytes, sha256 `77bcee066a76dcdd10d0d123c87e32c8ec2c74e31b6ffd87ebee49c9ac215dca`, Hugging Face revision `e40e9dd739c7be00fa965c16ce167088190ce114` |
+| Server | llama-cpp-python 0.3.16 (`llama_cpp.server`), CPU only, 4 threads, `n_ctx` 16384, the GGUF's own chat template |
+| Throughput | about 2.8 tokens/s generation, 20–24 tokens/s prompt |
+| govcode | `-num-ctx 16384 -max-tokens 2048 -temperature 0.1 -max-turns 20`, `-tool-prompt` set (see above) |
+| Air gap | server and govcode ran inside `unshare --net`: only `lo` present, outbound HTTPS and direct-IP connections both failed in the same namespace, `govcode verify` passed |
+
+Raw reports: [`docs/results/gov-40-granite-cpu/`](results/gov-40-granite-cpu/). The eval ran in two passes because the first was restarted on a fixed binary. Tasks 01–03 come from pass 1; task 04 was cut off there and re-run in pass 2 with 05–10.
+
+| Task | Lang | Passed | Finished | Turns | Calls | Valid | Exec errors | No-call turns | Minutes |
+|---|---|---|---|---|---|---|---|---|---|
+| 01 buffer overflow | C | **yes** | yes | 11 | 13 | 100% | 3 | 2 | 5 |
+| 02 sign extension | C | **yes** | yes | 7 | 9 | 100% | 1 | 1 | 5 |
+| 03 implement CRC | C | no | no | 10 | 9 | 100% | 2 | 5 | 20 |
+| 04 auto_ptr port | C++ | no | no | 7 | 8 | 88% | 2 | 4 | 59 |
+| 05 rule of three | C++ | no | no | 9 | 4 | 75% | 1 | 5 | 18 |
+| 06 Constraint_Error | Ada | **yes** | no | 12 | 17 | 100% | 2 | 5 | 6 |
+| 07 missing body | Ada | no | no | 16 | 15 | 100% | 5 | 6 | 11 |
+| 08 PIC truncation | COBOL | no | no | 11 | 10 | 100% | 1 | 5 | 7 |
+| 09 PERFORM VARYING | COBOL | no | no | 14 | 10 | 90% | 4 | 5 | 8 |
+| 10 rename across files | C | no | yes | 9 | 8 | 100% | 3 | 4 | 8 |
+
+**Totals: 3/10 passed. 97% valid tool calls (100 of 103), 74% executed without error, 42 of 106 turns had no tool call.** 100 calls came through the new `granite` text parser, 3 through `json`, none native. Against the go/no-go above (≥ 95% valid, ≥ 7/10 passed), Granite-8B on CPU is a **no-go** for this work, which is expected for a model a third the size of the target.
+
+What it shows:
+
+- **Tool-call format is not the bottleneck.** Once the template's instruction was restored, 97% of calls were well-formed. The failures are edit accuracy (`old_text` with invented comments or wrong whitespace, so govcode refuses the edit), prose turns with no call, and weak reasoning on C++ and COBOL.
+- **The safety gates held.** Mismatched edits were refused rather than guessed; a run that never passed its tests produced an `incomplete` proposal that `approve` refused; `audit verify` passed on every run (127 entries after four runs).
+- **Real-model bugs found and fixed** (each has a regression test built from a captured reply):
+  1. Granite's template drops its tool instruction when a system prompt is sent, so it never called tools. Fixed with `serve.tool_prompt` / `-tool-prompt` and a `granite` parser for `<|tool_call|>[...]`.
+  2. C source in arguments (`'\0'`) is invalid JSON, so the whole multi-call reply was dropped. Invalid escapes are now repaired.
+  3. A fenced JSON list of calls was ignored. It is now accepted when every name is a known tool.
+  4. The no-call nag did not repeat the model's format, so it kept answering in prose. It now does.
+  5. An eval killed part-way lost every finished task. The report is now saved after every task.
+- **Not yet shown with a real model:** a `ready` proposal approved through `approve` and its `evidence` record. Four full `run` attempts on task 01 ended `incomplete` or with no change. The eval passed the same task twice, so this is model variance, not a pipeline fault. The approval path is covered by the scripted end-to-end tests; it still needs one real-model pass on the target hardware. On a host with no TTY, approval uses the dev-policy `--yes` path (`allow_non_interactive_approval`).
+
+## Still to measure
+
+The target models (Devstral-Small-2507, and Qwen3-Coder where excepted) have **not** been run. Run the commands above on the GPU host; on that hardware the 10 tasks should take minutes, not the 3 hours this CPU run took.

@@ -1,0 +1,148 @@
+{
+  "model": "granite",
+  "num_ctx": 16384,
+  "started": "2026-11-17T18:24:28Z",
+  "results": [
+    {
+      "id": "01-c-buffer-overflow",
+      "language": "C",
+      "title": "Unbounded strcpy overruns callsign buffer",
+      "passed": true,
+      "check_output": "ok\n",
+      "metrics": {
+        "turns": 11,
+        "calls_emitted": 13,
+        "parsed_by": {
+          "fallback-granite": 13
+        },
+        "unknown_tool": 0,
+        "schema_invalid": 0,
+        "exec_ok": 10,
+        "exec_error": 3,
+        "no_call_turns": 2,
+        "context_trims": 0,
+        "prompt_tokens": 29413,
+        "completion_tokens": 758,
+        "model_time_ns": 322085444703,
+        "finished": true,
+        "stop_reason": "finished"
+      },
+      "valid_call_rate": 1,
+      "changed": [
+        "track.c"
+      ],
+      "duration_s": 322.27767987
+    },
+    {
+      "id": "02-c-sign-extension",
+      "language": "C",
+      "title": "Checksum wrong for payload bytes \u003e= 0x80",
+      "passed": true,
+      "check_output": "ok\n",
+      "metrics": {
+        "turns": 7,
+        "calls_emitted": 9,
+        "parsed_by": {
+          "fallback-granite": 8,
+          "fallback-json": 1
+        },
+        "unknown_tool": 0,
+        "schema_invalid": 0,
+        "exec_ok": 8,
+        "exec_error": 1,
+        "no_call_turns": 1,
+        "context_trims": 0,
+        "prompt_tokens": 18668,
+        "completion_tokens": 630,
+        "model_time_ns": 280187378022,
+        "finished": true,
+        "stop_reason": "finished"
+      },
+      "valid_call_rate": 1,
+      "changed": [
+        "frame.c"
+      ],
+      "duration_s": 280.298417985
+    },
+    {
+      "id": "03-c-implement-crc",
+      "language": "C",
+      "title": "Implement stubbed CRC-16/CCITT",
+      "passed": false,
+      "check_output": "crc.c: In function ‘crc16_ccitt’:\ncrc.c:11:2: error: ‘for’ loop initial declarations are only allowed in C99 or C11 mode\n   11 |  for (unsigned long i = 0; i \u003c len; ++i) {\n      |  ^~~\ncrc.c:11:2: note: use option ‘-std=c99’, ‘-std=gnu99’, ‘-std=c11’ or ‘-std=gnu11’ to compile your code\ncrc.c:13:6: error: ‘for’ loop initial declarations are only allowed in C99 or C11 mode\n   13 |      for (unsigned j = 0; j \u003c 16; ++j) {\n      |      ^~~\nmake: *** [Makefile:7: test_03] Error 1\n",
+      "metrics": {
+        "turns": 10,
+        "calls_emitted": 9,
+        "parsed_by": {
+          "fallback-granite": 9
+        },
+        "unknown_tool": 0,
+        "schema_invalid": 0,
+        "exec_ok": 7,
+        "exec_error": 2,
+        "no_call_turns": 5,
+        "context_trims": 0,
+        "prompt_tokens": 33948,
+        "completion_tokens": 2680,
+        "model_time_ns": 1173122752451,
+        "finished": false,
+        "stop_reason": "no_tool_call"
+      },
+      "valid_call_rate": 1,
+      "changed": [
+        "crc.c"
+      ],
+      "duration_s": 1173.297742962
+    },
+    {
+      "id": "04-cpp-auto-ptr",
+      "language": "C++",
+      "title": "Port std::auto_ptr to C++17",
+      "passed": false,
+      "error": "model request failed: Post \"http://127.0.0.1:8080/v1/chat/completions\": terminated signal received",
+      "check_output": "\n[govcode: context canceled]",
+      "metrics": {
+        "turns": 7,
+        "calls_emitted": 10,
+        "parsed_by": {
+          "fallback-granite": 10
+        },
+        "unknown_tool": 0,
+        "schema_invalid": 1,
+        "exec_ok": 6,
+        "exec_error": 3,
+        "no_call_turns": 1,
+        "context_trims": 0,
+        "prompt_tokens": 21938,
+        "completion_tokens": 2525,
+        "model_time_ns": 1602675036267,
+        "finished": false,
+        "stop_reason": "model_error"
+      },
+      "valid_call_rate": 0.9,
+      "changed": null,
+      "duration_s": 1603.120255834
+    }
+  ],
+  "totals": {
+    "tasks": 4,
+    "run": 4,
+    "passed": 2,
+    "calls_emitted": 41,
+    "valid_calls": 40,
+    "exec_ok": 31,
+    "exec_error": 9,
+    "unknown_tool": 0,
+    "schema_invalid": 1,
+    "no_call_turns": 9,
+    "turns": 35,
+    "parsed_by": {
+      "fallback-granite": 40,
+      "fallback-json": 1
+    },
+    "finished": 2,
+    "prompt_tokens": 103967,
+    "output_tokens": 6593,
+    "model_seconds": 3378.070611443
+  }
+}
