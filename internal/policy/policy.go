@@ -81,9 +81,13 @@ type Trust struct {
 	ReleaseManifest string   `json:"release_manifest"`
 	// ReleaseProvenance is the signed SLSA v1 provenance bundle
 	// (provenance.intoto.jsonl) shipped with the release.
-	ReleaseProvenance string   `json:"release_provenance,omitempty"`
-	ModelKeys         []string `json:"model_keys"`
-	KeyringDir        string   `json:"keyring_dir"`
+	ReleaseProvenance string `json:"release_provenance,omitempty"`
+	// UserCA is a PEM bundle of the site CAs that issue user (PIV/CAC)
+	// certificates. When set, keyring entries must be certificates that
+	// chain to it.
+	UserCA     string   `json:"user_ca,omitempty"`
+	ModelKeys  []string `json:"model_keys"`
+	KeyringDir string   `json:"keyring_dir"`
 }
 
 // Permissions are allow/ask/deny rules, e.g. "run_command(make *)",
@@ -165,14 +169,17 @@ type Policy struct {
 	Hooks         Hooks `json:"hooks"`
 	// SiteInstructions is a root-owned file of site-wide conventions loaded
 	// into every task prompt, before the repository's GOVCODE.md.
-	SiteInstructions    string   `json:"site_instructions,omitempty"`
-	RequirePlanApproval bool     `json:"require_plan_approval,omitempty"`
-	SIEM                SIEM     `json:"siem"`
-	Analysis            Analysis `json:"analysis"`
-	Host                Host     `json:"host"`
-	Sandbox             Sandbox  `json:"sandbox"`
-	Trust               Trust    `json:"trust"`
-	Audit               Audit    `json:"audit"`
+	SiteInstructions    string `json:"site_instructions,omitempty"`
+	RequirePlanApproval bool   `json:"require_plan_approval,omitempty"`
+	// RequireHardwareApprover: approvals must be signed with a PIV/CAC
+	// (PKCS#11) key whose CA-issued certificate is in the keyring.
+	RequireHardwareApprover bool     `json:"require_hardware_approver,omitempty"`
+	SIEM                    SIEM     `json:"siem"`
+	Analysis                Analysis `json:"analysis"`
+	Host                    Host     `json:"host"`
+	Sandbox                 Sandbox  `json:"sandbox"`
+	Trust                   Trust    `json:"trust"`
+	Audit                   Audit    `json:"audit"`
 
 	Path string `json:"-"`
 }
@@ -284,6 +291,9 @@ func (p *Policy) validate() ([]string, error) {
 	}
 	if p.Strict() && !p.Model.Origins().Active() {
 		warn = append(warn, "no model.allowed_origins or model.denied_origins: any model in the signed lock may be used regardless of origin")
+	}
+	if p.RequireHardwareApprover && p.Trust.UserCA == "" {
+		return nil, fmt.Errorf("require_hardware_approver needs trust.user_ca: the approver's certificate must chain to the site CA")
 	}
 	for _, an := range p.Analysis.Analyzers {
 		if err := an.Validate(); err != nil {

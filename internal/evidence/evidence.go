@@ -65,6 +65,10 @@ type Person struct {
 	UID      int    `json:"uid"`
 	Host     string `json:"host"`
 	KeyID    string `json:"key_id"`
+	// Signer is "pkcs11" (PIV/CAC token) or "file"; Certificate is the
+	// subject of the keyring certificate, when there is one.
+	Signer      string `json:"signer,omitempty"`
+	Certificate string `json:"certificate_subject,omitempty"`
 }
 
 // AuditRange is the span of the hash-chained log that covers the change:
@@ -95,8 +99,8 @@ func Build(p *proposal.Proposal, approver identity.User, approverKey, tip, ancho
 		Model:      *p.ModelInfo,
 		TaskSHA256: p.TaskSHA256, PlanSHA256: p.PlanSHA256, Files: p.Files, DiffSHA256: p.DiffSHA256,
 		Tests: p.Tests, Checks: checks,
-		Proposer:    Person{p.Proposer.Username, p.Proposer.UID, p.Proposer.Host, p.ProposerKey},
-		Approver:    Person{approver.Username, approver.UID, approver.Host, approverKey},
+		Proposer:    Person{Username: p.Proposer.Username, UID: p.Proposer.UID, Host: p.Proposer.Host, KeyID: p.ProposerKey},
+		Approver:    Person{Username: approver.Username, UID: approver.UID, Host: approver.Host, KeyID: approverKey},
 		ProposedAt:  p.Created,
 		ApprovedAt:  now.UTC().Format(time.RFC3339),
 		ReviewNotes: comment,
@@ -182,7 +186,7 @@ func (s Store) Load(id string, kr *keyring.Keyring, wantSHA string) (*Verified, 
 		if e.UID != r.Approver.UID {
 			continue
 		}
-		if _, kid, err := sign.VerifyFile(p, e.Pub); err == nil && kid == r.Approver.KeyID {
+		if _, kid, err := sign.VerifyFileWith(p, e.Pub); err == nil && kid == r.Approver.KeyID {
 			ok = true
 			break
 		}

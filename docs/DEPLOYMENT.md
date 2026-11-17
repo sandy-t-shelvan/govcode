@@ -163,6 +163,14 @@ install -m 644 /tmp/jdoe-signing.pub /etc/govcode/keys/jdoe.pub
 
 The keyring trusts `<user>.pub` only if the file is owned by root or by that user's own uid, and is not group- or world-writable. That ownership binding is what stops one person from signing as another. To rotate a key, add `jdoe.2.pub`; once old entries no longer need verifying, remove the old file.
 
+**PIV/CAC (recommended for approvers).** Each user writes `~/.config/govcode/signer.json`, naming the PKCS#11 module and the card's signature key (see SECURITY.md §5a). The user then runs:
+
+```bash
+govcode keygen --register
+```
+
+With a card configured, this registers the card's certificate instead of generating a key. In strict deployments, the ISSO installs that certificate as `/etc/govcode/keys/<user>.pub` instead. Set `trust.user_ca` to the site's CA bundle and `require_hardware_approver: true`. Then only CA-issued certificates are trusted, and approvals must be signed on a card.
+
 ## 6. Policy
 
 ```bash

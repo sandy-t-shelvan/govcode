@@ -34,14 +34,14 @@ func TestEnvelopeRoundTripAndTamper(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	trusted := []ed25519.PublicKey{s.Public()}
+	trusted := []ed25519.PublicKey{s.Public().(ed25519.PublicKey)}
 	if p, kid, err := VerifyEnvelope(env, InTotoPayloadType, trusted); err != nil || string(p) != `{"a":1}` || kid != s.KeyID() {
 		t.Fatalf("verify: %s %s %v", p, kid, err)
 	}
 	// The signature verifies against the raw ed25519 PAE, as other DSSE
 	// implementations will check it.
 	sig, _ := base64.StdEncoding.DecodeString(env.Signatures[0].Sig)
-	if !ed25519.Verify(s.Public(), PAE(InTotoPayloadType, []byte(`{"a":1}`)), sig) {
+	if !ed25519.Verify(s.Public().(ed25519.PublicKey), PAE(InTotoPayloadType, []byte(`{"a":1}`)), sig) {
 		t.Fatal("signature is not over PAE")
 	}
 
@@ -56,7 +56,7 @@ func TestEnvelopeRoundTripAndTamper(t *testing.T) {
 		},
 		"wrong type wanted": func(e *Envelope) ([]ed25519.PublicKey, string) { return trusted, "text/plain" },
 		"untrusted key": func(e *Envelope) ([]ed25519.PublicKey, string) {
-			return []ed25519.PublicKey{other.Public()}, InTotoPayloadType
+			return []ed25519.PublicKey{other.Public().(ed25519.PublicKey)}, InTotoPayloadType
 		},
 		"no signatures": func(e *Envelope) ([]ed25519.PublicKey, string) {
 			e.Signatures = nil
@@ -116,7 +116,7 @@ func TestProvenanceSignVerify(t *testing.T) {
 		t.Fatal(err)
 	}
 	bin := st.Subject[0].Digest["sha256"]
-	trusted := []ed25519.PublicKey{s.Public()}
+	trusted := []ed25519.PublicKey{s.Public().(ed25519.PublicKey)}
 	r, err := VerifyAttestation(line, SLSAProvenanceType, trusted, bin)
 	if err != nil {
 		t.Fatal(err)
@@ -136,7 +136,7 @@ func TestProvenanceSignVerify(t *testing.T) {
 	if _, err := VerifyAttestation(line, CycloneDXPredicate, trusted, bin); err == nil {
 		t.Error("wrong predicate type accepted")
 	}
-	if _, err := VerifyAttestation(line, SLSAProvenanceType, []ed25519.PublicKey{signer(t).Public()}, bin); err == nil {
+	if _, err := VerifyAttestation(line, SLSAProvenanceType, []ed25519.PublicKey{signer(t).Public().(ed25519.PublicKey)}, bin); err == nil {
 		t.Error("untrusted key accepted")
 	}
 	if _, err := BuildProvenance(dir, BuildInfo{}); err == nil {
@@ -162,7 +162,7 @@ func FuzzVerifyAttestation(f *testing.F) {
 	f.Add(line)
 	f.Add([]byte(`{"payloadType":"application/vnd.in-toto+json","payload":"e30=","signatures":[{"sig":""}]}`))
 	f.Add([]byte("{}\n{}"))
-	trusted := []ed25519.PublicKey{s.Public()}
+	trusted := []ed25519.PublicKey{s.Public().(ed25519.PublicKey)}
 	f.Fuzz(func(t *testing.T, data []byte) {
 		r, err := VerifyAttestation(data, SLSAProvenanceType, trusted, "aa")
 		if err == nil && (r == nil || r.Subject.Digest["sha256"] != "aa") {
