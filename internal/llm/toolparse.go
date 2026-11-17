@@ -276,6 +276,54 @@ var reTrailingComma = regexp.MustCompile(`,\s*([}\]])`)
 // RepairJSON fixes the faults local models most often make in JSON:
 // surrounding code fences, leading prose, trailing commas, and a missing
 // final brace. It returns the input unchanged if repair does not help.
+// fixInvalidEscapes makes a backslash that does not start a valid JSON
+// escape literal. Models writing C, Ada or COBOL into a JSON string often
+// leave '\0' or '\x41' as is; JSON rejects those, and the whole tool-call
+// list was lost. The model meant the backslash itself, so it is doubled.
+func fixInvalidEscapes(t string) string {
+	var b strings.Builder
+	inStr := false
+	for i := 0; i < len(t); i++ {
+		c := t[i]
+		if !inStr {
+			if c == '"' {
+				inStr = true
+			}
+			b.WriteByte(c)
+			continue
+		}
+		switch c {
+		case '"':
+			inStr = false
+		case '\\':
+			if i+1 < len(t) && strings.IndexByte(`"\\/bfnrtu`, t[i+1]) >= 0 {
+				if t[i+1] == 'u' && !(i+5 < len(t) && isHex4(t[i+2:i+6])) {
+					b.WriteString(`\\`)
+					continue
+				}
+				b.WriteByte(c)
+				b.WriteByte(t[i+1])
+				i++
+				continue
+			}
+			b.WriteString(`\\`)
+			continue
+		}
+		b.WriteByte(c)
+	}
+	return b.String()
+}
+
+func isHex4(s string) bool {
+	for i := 0; i < 4; i++ {
+		c := s[i]
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F') {
+			return false
+		}
+	}
+	return true
+}
+
 func RepairJSON(s string) string {
 	t := strings.TrimSpace(s)
 	t = strings.TrimPrefix(t, "```json")
@@ -288,6 +336,7 @@ func RepairJSON(s string) string {
 	if i := strings.IndexAny(t, "{["); i > 0 {
 		t = t[i:]
 	}
+	t = fixInvalidEscapes(t)
 	t = reTrailingComma.ReplaceAllString(t, "$1")
 	if json.Valid([]byte(t)) {
 		return t

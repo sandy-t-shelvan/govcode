@@ -2,6 +2,7 @@ package llm
 
 import (
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 )
@@ -201,5 +202,53 @@ func TestWithToolPrompt(t *testing.T) {
 	}
 	if m := ol.body(msgs, tools)["messages"].([]ollamaMsg); !strings.HasSuffix(m[0].Content, "TP") {
 		t.Errorf("ollama body: %q", m[0].Content)
+	}
+}
+
+func TestRepairInvalidEscapes(t *testing.T) {
+	cases := map[string]string{
+		`{"new_text":"buf[0] = '\0';"}`:       `buf[0] = '\0';`,
+		`{"new_text":"printf(\"%d\\n\", x)"}`: `printf("%d\n", x)`,
+		`{"new_text":"c = '\x41'"}`:           `c = '\x41'`,
+		`{"new_text":"é and \uZZ"}`:           `é and \uZZ`,
+		`{"new_text":"tab\there"}`:            "tab\there",
+	}
+	for in, want := range cases {
+		var v struct {
+			NewText string `json:"new_text"`
+		}
+		if err := json.Unmarshal([]byte(RepairJSON(in)), &v); err != nil {
+			t.Errorf("%s: %v (repaired %s)", in, err, RepairJSON(in))
+			continue
+		}
+		if v.NewText != want {
+			t.Errorf("%s: got %q, want %q", in, v.NewText, want)
+		}
+	}
+}
+
+// A real Granite-3.3-8B reply from the GOV-40 air-gapped run: four calls in
+// one list, the edit containing C's '\0'. Before the escape repair, the
+// whole list failed to parse and no call ran.
+func TestGraniteRealMultiCall(t *testing.T) {
+	b, err := os.ReadFile("testdata/granite_multi_call.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tools := []ToolSpec{{Name: "read_file"}, {Name: "search"}, {Name: "update_plan"}, {Name: "edit_file"}}
+	calls, _ := ExtractToolCalls(string(b), tools)
+	var names []string
+	for _, c := range calls {
+		names = append(names, c.Name)
+	}
+	if strings.Join(names, ",") != "read_file,search,update_plan,edit_file" {
+		t.Fatalf("calls %v", names)
+	}
+	var edit struct {
+		NewText string `json:"new_text"`
+	}
+	json.Unmarshal(calls[3].Args, &edit)
+	if !strings.Contains(edit.NewText, `t->callsign[CALLSIGN_LEN - 1] = '\0';`) {
+		t.Errorf("new_text lost the C literal: %q", edit.NewText)
 	}
 }
