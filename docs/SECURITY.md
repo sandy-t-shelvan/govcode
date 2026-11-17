@@ -121,9 +121,24 @@ See [SUPPLY_CHAIN.md](SUPPLY_CHAIN.md). In strict mode the binary refuses to sta
 - Identity is the kernel's real uid (`os.Getuid`), never `$USER`. govcode runs as the invoking user and has no setuid component.
 - `sensitive: true` forces `two_person_rule: true`. In strict mode the policy must be root-owned and not writable by others, and unknown fields are rejected.
 
+### 5a. PIV/CAC signing (PKCS#11)
+- With `~/.config/govcode/signer.json` (or `$GOVCODE_SIGNER`), govcode signs with a key on the user's PIV/CAC card through the site's PKCS#11 tooling (OpenSC `pkcs11-tool`). It runs the tool as an external process, so the binary has no cgo and no third-party code.
+
+  ```json
+  {"type": "pkcs11", "tool": "/usr/bin/pkcs11-tool", "module": "/usr/lib64/opensc-pkcs11.so", "token_label": "...", "key_id": "02"}
+  ```
+
+  On PIV cards, `key_id` "02" is usually the Digital Signature key (slot 9C).
+- Keys on the card are ECDSA P-256; govcode hashes with SHA-256 and the card signs the digest. The private key never leaves the card. Every signature is checked against the card's own key before use.
+- The PIN is asked for once per process at `/dev/tty`, with echo off. It is passed to the tool in the child's environment (`--pin env:…`), which only the same uid or root can read, never on the command line, where every user could see it. A wrong PIN is not cached, so govcode asks again, and the card counts the failures.
+- `govcode keygen --register` installs the card's certificate in the keyring. With `trust.user_ca` (the site's PEM CA bundle), only certificate entries that chain to it are trusted, and bare keys are ignored. The chain is checked at the certificate's issue time, so signatures made while it was valid still verify after it expires. Signing with an expired or not-yet-valid certificate fails preflight.
+- `require_hardware_approver: true` (which needs `trust.user_ca`) refuses an approval unless it is signed with a token key whose certificate is in the keyring. The evidence record and the `landed` audit entry record `signer: pkcs11` and the certificate subject.
+- Release and model signing keys stay Ed25519 file keys on the release and staging hosts.
+- **Revocation is not checked.** govcode does not consult CRLs or OCSP, because there is no network and the stdlib has no CRL path validation. When a card is revoked, the ISSO removes its certificate from the keyring. Signatures it made before revocation still verify, which is the intended behavior for an audit trail.
+
 ## Known limitations (read before an ATO)
 
-1. **Signing keys are files.** A user's key is protected by file permissions (0600, owner check). Anyone with that user's uid, or root, can sign as them. To bind keys to a person, put them on a PIV/CAC token or an HSM. The `sign.Signer` interface is the integration point; a PKCS#11 signer is not implemented yet.
+1. **File keys are bound to a uid, not a person.** A file key is protected by file permissions (0600, owner check), so anyone with that user's uid, or root, can sign as them. To bind signatures to a person, use a PIV/CAC token (section 5a): set `trust.user_ca` and `require_hardware_approver`. File keys then remain only for proposers at sites that allow it. The PKCS#11 signer has been tested with SoftHSM2 and OpenSC; **it has not yet been tested with a physical CAC and a site CA bundle.**
 2. **FIPS.** The release build links Go Cryptographic Module v1.0.0 in FIPS 140-3 mode (`GOFIPS140=v1.0.0`; `GODEBUG=fips140=on` is the default). The Go 1.27.4 toolchain lists v1.0.0 as certified (`lib/fips140/certified.txt`). Your crypto reviewer should still record the CMVP certificate number in the ATO package.
 3. **Truncation detection needs landed commits.** Activity after the last landed commit, such as proposals that were rejected or never decided, is protected by the chain and `chattr +a` but has no git anchor. Copy the log head (`govcode audit verify` prints it) to WORM media or your SIEM on a schedule.
 4. **The sandbox depends on the kernel.** Without unprivileged user namespaces, `sandbox.mode: required` refuses to run, which is correct. `best-effort` falls back to running commands unsandboxed and records `sandbox=none` in the audit log.

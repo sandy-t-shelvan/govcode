@@ -62,7 +62,8 @@
     "model_keys": [
       "/etc/govcode/trust/models.pub"
     ],
-    "keyring_dir": "/etc/govcode/keys"
+    "keyring_dir": "/etc/govcode/keys",
+    "user_ca": "/etc/govcode/trust/user-ca-bundle.pem"
   },
   "audit": {
     "require_append_only": true
@@ -169,5 +170,6 @@
   "host": {
     "require_fips": true,
     "require_selinux": true
-  }
+  },
+  "require_hardware_approver": true
 }

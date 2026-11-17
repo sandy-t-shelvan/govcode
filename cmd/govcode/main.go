@@ -460,6 +460,34 @@ func cmdKeygen(args []string) error {
 	register := fs.Bool("register", false, "copy the public key into the policy keyring")
 	out := fs.String("o", app.KeyPath(), "private key path")
 	parse(fs, args)
+	if _, err := os.Stat(app.SignerConfigPath()); err == nil && !flagSet(fs, "o") {
+		// A PIV/CAC token is configured: nothing to generate; the key lives
+		// on the card. Show it, and register its certificate if asked.
+		s, err := app.LoadUserSigner()
+		if err != nil {
+			return err
+		}
+		pemData, err := sign.CertificatePEM(s)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("PKCS#11 token key (%s), key id %s\n", app.SignerConfigPath(), s.KeyID())
+		if *register {
+			p, _, err := policy.Load(policy.Locate(*pol))
+			if err != nil {
+				return err
+			}
+			u, _ := identity.Current()
+			path, err := keyring.RegisterPEM(p.Trust.KeyringDir, u, pemData)
+			if err != nil {
+				return fmt.Errorf("register: %w (in strict deployments the ISSO installs the certificate)", err)
+			}
+			fmt.Println("registered", path)
+		} else {
+			os.Stdout.Write(pemData)
+		}
+		return nil
+	}
 	base := strings.TrimSuffix(*out, ".key")
 	pub, err := sign.GenerateKeyFiles(base)
 	if err != nil {
@@ -1199,4 +1227,15 @@ func cmdRewind(args []string) error {
 	}
 	fmt.Printf("rewound %s to checkpoint %d; changed files: %s\nResume: govcode run --resume %s\n", pos[0], n, strings.Join(files, ", "), pos[0])
 	return nil
+}
+
+// flagSet reports whether the named flag was given on the command line.
+func flagSet(fs *flag.FlagSet, name string) bool {
+	set := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			set = true
+		}
+	})
+	return set
 }

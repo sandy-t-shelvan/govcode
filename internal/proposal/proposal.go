@@ -176,7 +176,7 @@ func (s Store) Load(id string, kr *keyring.Keyring) (*Proposal, error) {
 	}
 	ok := false
 	for _, e := range trusted {
-		if _, _, err := sign.VerifyFile(path, e.Pub); err == nil {
+		if _, _, err := sign.VerifyFileWith(path, e.Pub); err == nil {
 			ok = true
 			break
 		}

@@ -6,9 +6,11 @@ import (
 	"bufio"
 	"context"
 	"crypto/ed25519"
+	"crypto/x509"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -58,6 +60,79 @@ func KeyPath() string {
 	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".config", "govcode", "signing.key")
+}
+
+// SignerConfigPath is the user's hardware signer configuration
+// (PIV/CAC through PKCS#11). If it exists it replaces the key file.
+func SignerConfigPath() string {
+	if k := os.Getenv("GOVCODE_SIGNER"); k != "" {
+		return k
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".config", "govcode", "signer.json")
+}
+
+// LoadUserSigner returns the invoking user's signer: the PKCS#11 token
+// when a signer configuration exists, otherwise the key file.
+func LoadUserSigner() (sign.Signer, error) {
+	if _, err := os.Stat(SignerConfigPath()); err == nil {
+		cfg, err := sign.LoadSignerConfig(SignerConfigPath())
+		if err != nil {
+			return nil, err
+		}
+		return sign.NewPKCS11Signer(*cfg, PINFromTTY)
+	}
+	return sign.LoadSigner(KeyPath())
+}
+
+// PINFromTTY reads the token PIN at the terminal with echo off. For
+// automated tests only, GOVCODE_PKCS11_PIN supplies it instead.
+func PINFromTTY(prompt string) (string, error) {
+	if p := os.Getenv("GOVCODE_PKCS11_PIN"); p != "" {
+		return p, nil
+	}
+	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	if err != nil {
+		return "", fmt.Errorf("no terminal for PIN entry: %w", err)
+	}
+	defer tty.Close()
+	stty := func(arg string) {
+		c := exec.Command("stty", arg)
+		c.Stdin = tty
+		c.Run()
+	}
+	fmt.Fprint(tty, prompt)
+	stty("-echo")
+	defer func() { stty("echo"); fmt.Fprintln(tty) }()
+	line, err := bufio.NewReader(tty).ReadString('\n')
+	if err != nil && line == "" {
+		return "", err
+	}
+	return strings.TrimRight(line, "\r\n"), nil
+}
+
+// CheckHardwareApprover enforces policy require_hardware_approver: the
+// approver must sign with a token key whose certificate is in the keyring.
+func (a *App) CheckHardwareApprover() error {
+	if !a.Policy.RequireHardwareApprover {
+		return nil
+	}
+	if a.Signer == nil || !sign.IsHardware(a.Signer) {
+		return fmt.Errorf("policy requires approvers to sign with a PIV/CAC hardware key (configure %s)", SignerConfigPath())
+	}
+	for _, e := range a.Keyring.ForUser(a.User.Username) {
+		if e.KeyID == a.Signer.KeyID() && e.UID == a.User.UID && e.Cert != nil {
+			return e.CertValidNow()
+		}
+	}
+	return fmt.Errorf("policy requires approvers to sign with a certificate in the keyring; %s has none for key %s", a.User.Username, a.Signer.KeyID())
+}
+
+func signerKind(s sign.Signer) string {
+	if sign.IsHardware(s) {
+		return "pkcs11"
+	}
+	return "file"
 }
 
 type Check struct {
@@ -201,27 +276,48 @@ func Open(policyPath string, out io.Writer, needSigner bool) (*App, []Check, err
 	}
 
 	// Keys
-	if a.Keyring, err = keyring.Load(p.Trust.KeyringDir); err != nil {
+	var roots *x509.CertPool
+	if p.Trust.UserCA != "" {
+		pemData, err := os.ReadFile(p.Trust.UserCA)
+		if err != nil {
+			return nil, nil, fmt.Errorf("trust.user_ca: %w", err)
+		}
+		roots = x509.NewCertPool()
+		if !roots.AppendCertsFromPEM(pemData) {
+			return nil, nil, fmt.Errorf("trust.user_ca %s holds no PEM certificates", p.Trust.UserCA)
+		}
+	}
+	if a.Keyring, err = keyring.LoadWithCA(p.Trust.KeyringDir, roots); err != nil {
 		return nil, nil, err
 	}
 	for _, s := range a.Keyring.Skipped {
 		add("keyring", "WARN", "ignored "+s)
 	}
 	if needSigner {
-		s, err := sign.LoadSigner(KeyPath())
+		s, err := LoadUserSigner()
 		if err != nil {
 			add("signing key", "FAIL", err.Error())
 		} else {
 			a.Signer = s
-			registered := false
+			var entry *keyring.Entry
 			for _, e := range a.Keyring.ForUser(a.User.Username) {
-				if e.KeyID == s.KeyID() {
-					registered = true
+				if e.KeyID == s.KeyID() && e.UID == a.User.UID {
+					e := e
+					entry = &e
 				}
 			}
-			if registered {
-				add("signing key", "PASS", "key "+s.KeyID()+" registered for "+a.User.Username)
-			} else {
+			kind := "file key"
+			if sign.IsHardware(s) {
+				kind = "PKCS#11 token key"
+			}
+			switch {
+			case entry != nil && entry.CertValidNow() != nil:
+				add("signing key", "FAIL", entry.CertValidNow().Error())
+			case entry != nil && entry.Cert != nil:
+				add("signing key", "PASS", fmt.Sprintf("%s %s registered for %s (certificate %s, expires %s)", kind, s.KeyID(), a.User.Username, entry.Cert.Subject.CommonName, entry.Cert.NotAfter.Format("2006-01-02")))
+			case entry != nil:
+				add("signing key", "PASS", kind+" "+s.KeyID()+" registered for "+a.User.Username)
+			default:
 				add("signing key", "FAIL", fmt.Sprintf("key %s is not in the keyring %s for %s (run `govcode keygen --register` or ask the ISSO to install your .pub)", s.KeyID(), p.Trust.KeyringDir, a.User.Username))
 			}
 		}
@@ -259,6 +355,10 @@ func Open(policyPath string, out io.Writer, needSigner bool) (*App, []Check, err
 // caller; proposal.Store.Approve re-checks the approver.
 func (a *App) Land(p *proposal.Proposal, rules proposal.Rules, comment string) (*proposal.LandResult, error) {
 	sess := a.Session(p.ID)
+	if err := a.CheckHardwareApprover(); err != nil {
+		sess.Record("approval_refused", map[string]any{"proposal": p.ID, "approver": a.User.Username, "reason": err.Error()})
+		return nil, err
+	}
 	anchor := func(kind string, payload map[string]any) (string, error) {
 		e, err := sess.RecordEntry(kind, payload)
 		if err != nil {
@@ -270,6 +370,12 @@ func (a *App) Land(p *proposal.Proposal, rules proposal.Rules, comment string) (
 		r, err := evidence.Build(p, a.User, a.Signer.KeyID(), tip, anc, comment != "", time.Now())
 		if err != nil {
 			return "", err
+		}
+		r.Approver.Signer = signerKind(a.Signer)
+		for _, e := range a.Keyring.ForUser(a.User.Username) {
+			if e.KeyID == a.Signer.KeyID() && e.Cert != nil {
+				r.Approver.Certificate = e.Cert.Subject.String()
+			}
 		}
 		sum, err := a.Evidence.Save(r, a.Signer)
 		if err != nil {
@@ -283,7 +389,7 @@ func (a *App) Land(p *proposal.Proposal, rules proposal.Rules, comment string) (
 		sess.Record("approval_failed", map[string]any{"proposal": p.ID, "error": err.Error()})
 		return nil, err
 	}
-	sess.Record("landed", map[string]any{"proposal": p.ID, "commit": res.Commit, "target": p.Target, "base": res.TargetWas, "evidence_sha256": res.Evidence})
+	sess.Record("landed", map[string]any{"proposal": p.ID, "commit": res.Commit, "target": p.Target, "base": res.TargetWas, "evidence_sha256": res.Evidence, "signer": signerKind(a.Signer)})
 	return res, nil
 }
 

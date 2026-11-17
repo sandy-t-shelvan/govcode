@@ -135,7 +135,7 @@ func (s Store) Load(id string, kr *keyring.Keyring, user identity.User) (*State,
 		if e.UID != st.Proposer.UID {
 			continue
 		}
-		if _, _, err := sign.VerifyFile(s.path(id), e.Pub); err == nil {
+		if _, _, err := sign.VerifyFileWith(s.path(id), e.Pub); err == nil {
 			ok = true
 			break
 		}
