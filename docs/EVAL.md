@@ -45,7 +45,9 @@ The same eval against Devstral on vLLM (Qwen3-Coder works the same way where the
 govcode eval -backend openai -endpoint http://127.0.0.1:8000/v1 -model devstral-small-24b -num-ctx 32768 -temperature 0.15
 ```
 
-Results go to `eval/results/<time>-<model>.json` and `.md`.
+Results go to `eval/results/<time>-<model>.json` and `.md`. The report is rewritten after every task and has `"complete": false` until the run finishes, so an interrupted run (Ctrl-C, SIGTERM, a reboot) keeps the tasks it finished. To resume, pass the remaining tasks as a list, for example `-only 04,05,06`.
+
+A model whose chat template drops its tool-calling instruction when a system prompt is present (Granite 3.x does this) needs that instruction restored. Set it with `-tool-prompt` here, or `serve.tool_prompt` in the model lock for `govcode run`.
 
 ## Metrics
 
@@ -53,7 +55,7 @@ Results go to `eval/results/<time>-<model>.json` and `.md`.
 |---|---|
 | **valid tool calls** | Share of emitted calls that named a real tool *and* had schema-valid arguments. This is the core "can it call tools" number. |
 | executed without error | The call ran and the tool succeeded; for example, `old_text` matched the file exactly. A low value with high validity usually means whitespace or column mistakes in edits. |
-| parse path | `native`, or which text fallback recovered the call (`qwen-xml`, `hermes`, `mistral`, `json`). |
+| parse path | `native`, or which text fallback recovered the call (`qwen-xml`, `hermes`, `mistral`, `granite`, `json`). |
 | no-call turns | Replies with prose and no tool call. govcode nudges up to 3 times, then stops. |
 | tasks passed | The hidden checker passed on the final tree. |
 | finished | The model called `finish` and the test gate accepted it. |
