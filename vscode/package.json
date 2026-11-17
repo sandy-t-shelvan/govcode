@@ -1,0 +1,48 @@
+{
+  "name": "govcode",
+  "displayName": "govcode",
+  "description": "Air-gapped coding agent for legacy code: local model, sandboxed tools, signed audit log, two-person approval.",
+  "version": "0.2.0",
+  "publisher": "govcode-local",
+  "license": "MIT",
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Other"],
+  "main": "./extension.js",
+  "activationEvents": ["onStartupFinished"],
+  "extensionKind": ["workspace"],
+  "capabilities": {
+    "untrustedWorkspaces": { "supported": false, "description": "govcode runs builds and tests in the workspace." },
+    "virtualWorkspaces": false
+  },
+  "contributes": {
+    "commands": [
+      { "command": "govcode.showPanel", "title": "govcode: Open Agent Panel" },
+      { "command": "govcode.refreshProposals", "title": "govcode: Refresh Proposals", "icon": "$(refresh)" },
+      { "command": "govcode.approve", "title": "govcode: Approve Proposal (in terminal)" },
+      { "command": "govcode.reject", "title": "govcode: Reject Proposal" },
+      { "command": "govcode.verifyAudit", "title": "govcode: Verify Audit Log" },
+      { "command": "govcode.restartServer", "title": "govcode: Restart Server" }
+    ],
+    "viewsContainers": {
+      "activitybar": [{ "id": "govcode", "title": "govcode", "icon": "media/shield.svg" }]
+    },
+    "views": {
+      "govcode": [{ "id": "govcode.proposals", "name": "Proposals" }]
+    },
+    "menus": {
+      "view/title": [{ "command": "govcode.refreshProposals", "when": "view == govcode.proposals", "group": "navigation" }],
+      "view/item/context": [
+        { "command": "govcode.approve", "when": "view == govcode.proposals && viewItem == proposal.ready" },
+        { "command": "govcode.reject", "when": "view == govcode.proposals && viewItem =~ /^proposal\\.(ready|blocked|tests_failed|incomplete)$/" }
+      ]
+    },
+    "configuration": {
+      "title": "govcode",
+      "properties": {
+        "govcode.binaryPath": { "type": "string", "default": "govcode", "scope": "machine", "description": "Path to the signed govcode binary." },
+        "govcode.policyPath": { "type": "string", "default": "", "scope": "machine", "description": "Policy file (default: $GOVCODE_POLICY or /etc/govcode/policy.json)." }
+      }
+    }
+  },
+  "scripts": { "test": "node --test test/*.test.js" }
+}

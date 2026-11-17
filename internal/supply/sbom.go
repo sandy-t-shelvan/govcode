@@ -12,6 +12,11 @@ import (
 	"github.com/sandy-t-shelvan/govcode/internal/modelpin"
 )
 
+// Extra is an additional shipped artifact (e.g. the VS Code extension).
+type Extra struct {
+	Name, Type, Path, Description string
+}
+
 // SystemTool is an external executable govcode invokes. Each is listed in
 // the SBOM with its resolved path, version string and SHA-256 so the
 // reviewer can compare against the site's approved software baseline.
@@ -56,7 +61,7 @@ func ProbeTools() []ToolInfo {
 // SBOM describes this binary (from embedded build info, so it reflects
 // exactly what was linked), its Go module dependencies, the Go toolchain,
 // the system tools found on this host, and optionally the model set.
-func SBOM(lock *modelpin.Lock) (*BOM, error) {
+func SBOM(lock *modelpin.Lock, extras ...Extra) (*BOM, error) {
 	bi, ok := debug.ReadBuildInfo()
 	if !ok {
 		return nil, fmt.Errorf("binary has no build info")
@@ -109,6 +114,16 @@ func SBOM(lock *modelpin.Lock) (*BOM, error) {
 		if t.Found {
 			deps = append(deps, c.BOMRef)
 		}
+	}
+	for _, x := range extras {
+		sum, size, err := modelpin.HashFile(x.Path)
+		if err != nil {
+			return nil, fmt.Errorf("sbom extra %s: %w", x.Name, err)
+		}
+		c := Component{BOMRef: "file:" + x.Name, Type: x.Type, Name: x.Name, Version: Version, Description: x.Description,
+			Hashes: []Hash{{"SHA-256", sum}}, Licenses: License("MIT"), Properties: []Property{{"size", fmt.Sprint(size)}}}
+		b.Components = append(b.Components, c)
+		deps = append(deps, c.BOMRef)
 	}
 	if lock != nil {
 		ai := AIBOM(lock)
