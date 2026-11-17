@@ -46,6 +46,17 @@ type Config struct {
 	OnTurn func(msgs []llm.Message)
 }
 
+// nagText is sent after a reply with no tool call. When the model's lock
+// gives a tool-call format, it is repeated: small models that describe a
+// call in prose usually have lost the format, not the intent.
+func nagText(toolPrompt string) string {
+	t := "You did not call a tool. Continue the task by calling a tool now. If the task is complete and tests pass, call finish."
+	if toolPrompt != "" {
+		t += "\n" + toolPrompt
+	}
+	return t
+}
+
 // approvedPlanMarker is written into the task message when a plan is
 // approved; it survives in saved history.
 const approvedPlanMarker = "\nAPPROVED PLAN (follow it; do not expand the scope):\n"
@@ -229,7 +240,7 @@ func (a *Agent) Run(ctx context.Context, task string, rc RepoContext) (*Result, 
 				break
 			}
 			msgs = append(msgs, llm.Message{Role: llm.RoleAssistant, Content: recorded},
-				llm.Message{Role: llm.RoleUser, Content: "You did not call a tool. Continue the task by calling a tool now. If the task is complete and tests pass, call finish."})
+				llm.Message{Role: llm.RoleUser, Content: nagText(opts.ToolPrompt)})
 			turnDone()
 			continue
 		}
