@@ -76,14 +76,23 @@ func (a *App) Run(ctx context.Context, o RunOptions) (*proposal.Proposal, error)
 	th := sha256.Sum256([]byte(o.Task))
 	modelID := backend.ModelName()
 	digest := ""
+	taskFields := map[string]any{}
 	if a.Model != nil {
 		modelID = a.Model.ID + " (" + backend.ModelName() + ")"
 		digest = a.Model.Serve.OllamaDigest
+		taskFields["model_publisher"] = a.Model.Publisher
+		taskFields["model_origin"] = strings.Join(a.Model.Origins(), ",")
 	}
-	taskEntry, err := sess.RecordEntry("task", map[string]any{
+	if e := a.OriginException; e != nil {
+		taskFields["origin_exception"] = map[string]any{"model_id": e.ModelID, "authorized_by": e.AuthorizedBy, "reference": e.Reference, "expires": e.Expires}
+	}
+	for k, v := range map[string]any{
 		"proposal": id, "task": o.Task, "task_sha256": hex.EncodeToString(th[:]), "base": base, "target": p.TargetBranch,
 		"branch": branch, "model": modelID, "model_digest": digest, "num_ctx": backend.Options().NumCtx,
-	})
+	} {
+		taskFields[k] = v
+	}
+	taskEntry, err := sess.RecordEntry("task", taskFields)
 	if err != nil {
 		return nil, err
 	}

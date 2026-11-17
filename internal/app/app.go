@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/sandy-t-shelvan/govcode/internal/audit"
 	"github.com/sandy-t-shelvan/govcode/internal/gitx"
@@ -27,18 +28,21 @@ import (
 )
 
 type App struct {
-	Policy   *policy.Policy
-	User     identity.User
-	Repo     *gitx.Repo
-	Keyring  *keyring.Keyring
-	Signer   sign.Signer
-	Log      *audit.Log
-	Store    proposal.Store
-	Lock     *modelpin.Lock
-	Model    *modelpin.Model
-	Out      io.Writer
-	Warnings []string
-	siemExp  *siem.Exporter
+	Policy  *policy.Policy
+	User    identity.User
+	Repo    *gitx.Repo
+	Keyring *keyring.Keyring
+	Signer  sign.Signer
+	Log     *audit.Log
+	Store   proposal.Store
+	Lock    *modelpin.Lock
+	Model   *modelpin.Model
+	// OriginException is set when the selected model's origin is denied
+	// but the policy records an AO exception for it; every task records it.
+	OriginException *policy.OriginException
+	Out             io.Writer
+	Warnings        []string
+	siemExp         *siem.Exporter
 }
 
 // KeyPath is the invoking user's private signing key.
@@ -131,6 +135,7 @@ func Open(policyPath string, out io.Writer, needSigner bool) (*App, []Check, err
 				add("model", "FAIL", err.Error())
 			} else {
 				a.Model = m
+				a.checkOrigin(m, add)
 				if m.Serve.NumCtx != p.Model.NumCtx {
 					add("num_ctx", "FAIL", fmt.Sprintf("policy num_ctx %d != lock num_ctx %d", p.Model.NumCtx, m.Serve.NumCtx))
 				} else {
@@ -211,10 +216,38 @@ func Open(policyPath string, out io.Writer, needSigner bool) (*App, []Check, err
 	return a, checks, nil
 }
 
+// checkOrigin applies model.allowed_origins / denied_origins to the model
+// and its lineage. A denial is fatal in every mode unless the policy holds an
+// unexpired AO exception naming this exact model.
+func (a *App) checkOrigin(m *modelpin.Model, add func(name, status, detail string)) {
+	pm := a.Policy.Model
+	op := pm.Origins()
+	if !op.Active() {
+		add("model origin", "SKIP", "no origin restriction in policy; lock records "+strings.Join(m.Origins(), ","))
+		return
+	}
+	err := modelpin.CheckOrigin(m, op)
+	if err == nil {
+		add("model origin", "PASS", m.ID+" origin "+strings.Join(m.Origins(), ","))
+		return
+	}
+	if e := pm.OriginException; e != nil && e.ModelID == m.ID {
+		exp, _ := time.Parse("2006-01-02", e.Expires)
+		if time.Now().Before(exp.AddDate(0, 0, 1)) {
+			a.OriginException = e
+			add("model origin", "WARN", fmt.Sprintf("%v; permitted by AO exception (%s, ref %s, expires %s)", err, e.AuthorizedBy, e.Reference, e.Expires))
+			return
+		}
+		add("model origin", "FAIL", fmt.Sprintf("%v; AO exception %s expired on %s", err, e.Reference, e.Expires))
+		return
+	}
+	add("model origin", "FAIL", err.Error())
+}
+
 // Some failures are fatal even in warn mode.
 func isAlwaysFatal(name string) bool {
 	switch name {
-	case "signing key", "audit log", "sandbox", "num_ctx", "served model digest":
+	case "signing key", "audit log", "sandbox", "num_ctx", "served model digest", "model origin":
 		return true
 	}
 	return false

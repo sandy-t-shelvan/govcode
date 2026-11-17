@@ -18,7 +18,7 @@ set -euo pipefail
 LLAMA_CPP_TAG=b12447
 LLAMA_CPP_COMMIT=a06044b934db085e373286444e0c15b93635a20c
 OUT=${1:?out dir}; KEY=${2:?signing key}; shift 2
-IDS=("$@"); [ ${#IDS[@]} -eq 0 ] && IDS=(qwen3-coder-30b-a3b devstral-small-24b)
+IDS=("$@"); [ ${#IDS[@]} -eq 0 ] && IDS=(devstral-small-24b qwen3-coder-30b-a3b)
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 LOCK_IN=$ROOT/models/models.lock.json
 mkdir -p "$OUT/weights" "$OUT/build"

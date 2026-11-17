@@ -36,14 +36,34 @@ scripts/build-release.sh 0.1.0 /secure/release.key
 
 ### Pins (`models/models.lock.json`)
 
-| Model | Upstream (first party) | Revision | Served artifact |
-|---|---|---|---|
-| Qwen3-Coder-30B-A3B-Instruct | `Qwen/Qwen3-Coder-30B-A3B-Instruct` | `b2cff646eb4bb1d68355c01b18ae02e7cf42d120` | Q4_K_M GGUF quantized by us with llama.cpp `b12447` (`a06044b9…`) |
-| Devstral-Small-2507 | `mistralai/Devstral-Small-2507` | `bd165ab26cebbcc2eea2c4ecbfc07f3ac42b3c39` | first-party `mistralai/Devstral-Small-2507_gguf@ee2f0c00…` Q4_K_M, SHA-256 `1bcc2b1b…1796` |
+| Model | Origin | Upstream (first party) | Revision | Served artifact |
+|---|---|---|---|---|
+| **Devstral-Small-2507** (default) | FR (Mistral AI); derived from `Mistral-Small-3.1-24B-Instruct-2503`, FR | `mistralai/Devstral-Small-2507` | `bd165ab26cebbcc2eea2c4ecbfc07f3ac42b3c39` | first-party `mistralai/Devstral-Small-2507_gguf@ee2f0c00…` Q4_K_M, SHA-256 `1bcc2b1b…1796` |
+| Qwen3-Coder-30B-A3B-Instruct | CN (Alibaba Cloud); the hub card names no base model | `Qwen/Qwen3-Coder-30B-A3B-Instruct` | `b2cff646eb4bb1d68355c01b18ae02e7cf42d120` | Q4_K_M GGUF quantized by us with llama.cpp `b12447` (`a06044b9…`) |
 
 Every upstream weight shard is pinned by the SHA-256 published in the hub's LFS metadata at that exact revision: 16 shards for Qwen and 10 for Devstral. Small text files (tokenizer, config, chat template) are pinned by git blob id; staging verifies them and records their SHA-256. A third-party Qwen GGUF (`unsloth`, revision `b17cb02d…`) is listed as `reference_prequantized` only. Self-quantizing from first-party weights is the default because it keeps the provenance chain first-party.
 
 Fields marked `FILL_AT_STAGING` cannot be known before staging: the SHA-256 of the GGUF we produce, and the Ollama manifest digest. `govcode model verify` and the preflight treat an unfilled hash as a **failure**.
+
+### Model selection and origin policy (for the AO)
+
+Every model in the lock records `origin` (the publisher's country, ISO 3166-1 alpha-2) and `derived_from` (the models it was fine-tuned or distilled from, each with its own origin). Both are inside the signed lock and are emitted in the AI-BOM.
+
+The policy restricts models by origin:
+
+```json
+"model": { "id": "devstral-small-24b", "denied_origins": ["CN"] }
+```
+
+- `denied_origins` refuses a model if it **or any model in its lineage** has a listed origin. `allowed_origins` refuses anything not listed. A model with no recorded origin is refused whenever either list is set, because unknown provenance counts as denied.
+- A denied model fails preflight in **every** mode, including development (`warn`) mode. The example strict policy denies `CN`. A strict policy without either list gets a preflight warning.
+- The AO can permit one specific model with a time-limited exception. Preflight shows it as WARN, and every task's audit entry records it with `model_origin`:
+
+  ```json
+  "origin_exception": { "model_id": "qwen3-coder-30b-a3b", "authorized_by": "J. Smith, AO", "reference": "memo 2026-117", "expires": "2027-03-31" }
+  ```
+
+Why Devstral is the default: the FY2026 NDAA (§1532) bars DeepSeek from DoD use and contractors, and further restrictions on PRC-origin AI are in progress. Qwen is published by Alibaba Cloud (PRC). Both models are Apache-2.0. Decide with your AO and counsel before an exception, and re-run `govcode eval` on whichever model you deploy (see [EVAL.md](EVAL.md)).
 
 ### Pipeline
 
@@ -66,6 +86,7 @@ scripts/stage-models.sh out/ models-signing.key
 - the served artifact's hashes;
 - the first-party upstream weights as `pedigree.ancestors`, each shard with its SHA-256;
 - the license (Apache-2.0 for both models);
+- the origin (`govcode:origin`, `govcode:lineage_origins`) and the `derived_from` lineage as further pedigree ancestors;
 - a `modelCard` (task, considerations, the context-length limit);
 - the serving parameters (`num_ctx`, tool-call parser, Ollama digest) as properties.
 

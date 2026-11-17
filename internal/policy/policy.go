@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/sandy-t-shelvan/govcode/internal/marking"
+	"github.com/sandy-t-shelvan/govcode/internal/modelpin"
 	"github.com/sandy-t-shelvan/govcode/internal/netguard"
 	"github.com/sandy-t-shelvan/govcode/internal/permissions"
 )
@@ -33,6 +34,27 @@ type Model struct {
 	MaxTokens    int     `json:"max_tokens"`
 	Temperature  float64 `json:"temperature"`
 	VerifyDigest bool    `json:"verify_digest"`
+	// AllowedOrigins / DeniedOrigins restrict models by the publisher
+	// country (ISO 3166-1 alpha-2) of the model and of every model it was
+	// derived from, as recorded in the signed lock.
+	AllowedOrigins []string `json:"allowed_origins,omitempty"`
+	DeniedOrigins  []string `json:"denied_origins,omitempty"`
+	// OriginException lets the Authorizing Official permit one specific
+	// model despite DeniedOrigins. It is shown by preflight and recorded in
+	// every task's audit entry.
+	OriginException *OriginException `json:"origin_exception,omitempty"`
+}
+
+type OriginException struct {
+	ModelID      string `json:"model_id"`
+	AuthorizedBy string `json:"authorized_by"`
+	Reference    string `json:"reference"`
+	Expires      string `json:"expires"` // YYYY-MM-DD
+}
+
+// Origins returns the policy's model-origin restriction.
+func (m Model) Origins() modelpin.OriginPolicy {
+	return modelpin.OriginPolicy{Allowed: m.AllowedOrigins, Denied: m.DeniedOrigins}
 }
 
 type Tests struct {
@@ -217,6 +239,22 @@ func (p *Policy) validate() ([]string, error) {
 	if p.Model.MaxTokens <= 0 || p.Model.MaxTokens >= p.Model.NumCtx/2 {
 		return nil, fmt.Errorf("model.max_tokens must be > 0 and < num_ctx/2")
 	}
+	for _, c := range append(append([]string{}, p.Model.AllowedOrigins...), p.Model.DeniedOrigins...) {
+		if !modelpin.ValidCountry(c) {
+			return nil, fmt.Errorf("model origins must be upper-case ISO 3166-1 alpha-2 codes, got %q", c)
+		}
+	}
+	if e := p.Model.OriginException; e != nil {
+		if e.ModelID == "" || e.AuthorizedBy == "" || e.Reference == "" || e.Expires == "" {
+			return nil, fmt.Errorf("model.origin_exception needs model_id, authorized_by, reference and expires")
+		}
+		if _, err := time.Parse("2006-01-02", e.Expires); err != nil {
+			return nil, fmt.Errorf("model.origin_exception.expires must be YYYY-MM-DD")
+		}
+	}
+	if p.Strict() && !p.Model.Origins().Active() {
+		warn = append(warn, "no model.allowed_origins or model.denied_origins: any model in the signed lock may be used regardless of origin")
+	}
 	switch p.Sandbox.Mode {
 	case "required", "best-effort":
 	case "off":
@@ -348,8 +386,8 @@ func Dev(repoRoot, stateDir, user string) *Policy {
 		Schema: Schema, Classification: "UNCLASSIFIED//DEVELOPMENT", RepoRoot: repoRoot, StateDir: stateDir,
 		TargetBranch: "main", Sensitive: false, TwoPersonRule: false, Approvers: []string{user},
 		MaxTurns: 40,
-		Model: Model{Backend: "ollama", Endpoint: "http://127.0.0.1:11434", ID: "qwen3-coder-30b-a3b",
-			ServedName: "govcode-qwen3-coder:30b-q4km", NumCtx: 32768, MaxTokens: 4096, Temperature: 0.2},
+		Model: Model{Backend: "ollama", Endpoint: "http://127.0.0.1:11434", ID: "devstral-small-24b",
+			ServedName: "govcode-devstral:24b-q4km", NumCtx: 32768, MaxTokens: 4096, Temperature: 0.15},
 		Tests:    Tests{Command: "make test", TimeoutSeconds: 600, RequirePass: true},
 		Commands: Commands{Allowlist: []string{"make", "cmake --build", "gcc", "g++", "cc", "gnatmake", "gprbuild", "cobc", "gfortran", "git status", "git diff", "git log"}, PromptForOthers: true},
 		Sandbox:  Sandbox{Mode: "best-effort"},

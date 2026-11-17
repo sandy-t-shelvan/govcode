@@ -2,7 +2,7 @@
 
 An air-gapped coding agent for legacy code, built for closed enclaves where nothing may leave the host and every change needs a named human approver.
 
-- **Local model only.** Qwen3-Coder-30B-A3B or Devstral-Small-24B, served by Ollama, vLLM or llama.cpp on `127.0.0.1`. There is no cloud provider code. The only network client refuses any address that is not loopback.
+- **Local model only.** Devstral-Small-24B (Mistral AI, France) by default, or Qwen3-Coder-30B-A3B where policy allows its origin, served by Ollama, vLLM or llama.cpp on `127.0.0.1`. There is no cloud provider code. The only network client refuses any address that is not loopback.
 - **Works on the code you have.** Plan → edit → test → fix on C, C++, Ada, COBOL and Fortran, in large repositories hosted on on-prem git. Edits are byte-exact, so COBOL columns, tabs and CRLF line endings survive.
 - **Signed audit log.** Append-only and hash-chained. Each entry is Ed25519-signed by the OS user who caused it. It records who asked, what the model said and did, every command, every diff, and who approved.
 - **Signed supply chain.** Go standard library only, with zero third-party modules. The build is reproducible and uses FIPS 140-3 mode. It ships with a CycloneDX SBOM and AI-BOM, and model weights are pinned by SHA-256 in a signed lock file. The binary refuses to run if its own hash is not in the signed release manifest.
@@ -64,7 +64,7 @@ govcode keygen --register && govcode verify
 ```
 
 ```bash
-ollama create govcode-qwen3-coder:30b-q4km -f deploy/ollama/Modelfile.qwen3-coder-30b-a3b
+ollama create govcode-devstral:24b-q4km -f deploy/ollama/Modelfile.devstral-small-24b
 ```
 
 ```bash
