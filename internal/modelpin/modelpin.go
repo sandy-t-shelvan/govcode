@@ -67,6 +67,17 @@ type Model struct {
 	Artifact    Source    `json:"artifact"`
 	Prequant    *Source   `json:"reference_prequantized,omitempty"`
 	Serve       Serve     `json:"serve"`
+	// StagingScan is the low-side malware scan of the staged weights,
+	// recorded by stage-models.sh inside the signed lock.
+	StagingScan *Scan `json:"staging_scan,omitempty"`
+}
+
+type Scan struct {
+	Scanner    string `json:"scanner"`
+	Version    string `json:"version"`
+	Signatures string `json:"signatures,omitempty"` // signature database version/date
+	Result     string `json:"result"`               // "clean" or the scanner's finding
+	ScannedAt  string `json:"scanned_at"`
 }
 
 type Lock struct {
@@ -128,6 +139,10 @@ func VerifyArtifacts(m *Model, dir string, progress func(string)) []Problem {
 		p := filepath.Join(dir, "weights", f.Path)
 		if f.SHA256 == "" || f.SHA256 == Unfilled {
 			probs = append(probs, Problem{p, "lock has no SHA-256 for this file (not staged)"})
+			continue
+		}
+		if err := CheckWeightFile(p); err != nil {
+			probs = append(probs, Problem{p, err.Error()})
 			continue
 		}
 		if progress != nil {

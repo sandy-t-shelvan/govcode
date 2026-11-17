@@ -145,6 +145,23 @@ func Open(policyPath string, out io.Writer, needSigner bool) (*App, []Check, err
 			} else {
 				a.Model = m
 				a.checkOrigin(m, add)
+				if probs := m.CheckFormats(); len(probs) > 0 {
+					add("model format", "FAIL", probs[0].Path+": "+probs[0].Msg)
+				} else {
+					add("model format", "PASS", "GGUF/safetensors only")
+				}
+				switch s := m.StagingScan; {
+				case s == nil:
+					st := "SKIP"
+					if p.Strict() {
+						st = "WARN"
+					}
+					add("model scan", st, "no staging malware scan recorded in the lock")
+				case s.Result != "clean":
+					add("model scan", "FAIL", fmt.Sprintf("%s %s reported: %s", s.Scanner, s.Version, s.Result))
+				default:
+					add("model scan", "PASS", fmt.Sprintf("clean (%s %s, signatures %s, %s)", s.Scanner, s.Version, s.Signatures, s.ScannedAt))
+				}
 				if m.Serve.NumCtx != p.Model.NumCtx {
 					add("num_ctx", "FAIL", fmt.Sprintf("policy num_ctx %d != lock num_ctx %d", p.Model.NumCtx, m.Serve.NumCtx))
 				} else {
@@ -389,7 +406,7 @@ func checkProvenance(path string, keyPaths []string) (string, string, string) {
 // Some failures are fatal even in warn mode.
 func isAlwaysFatal(name string) bool {
 	switch name {
-	case "signing key", "audit log", "sandbox", "num_ctx", "served model digest", "model origin", "build provenance", "static analysis":
+	case "signing key", "audit log", "sandbox", "num_ctx", "served model digest", "model origin", "build provenance", "static analysis", "model format", "model scan":
 		return true
 	}
 	return false

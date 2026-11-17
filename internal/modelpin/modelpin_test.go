@@ -34,13 +34,13 @@ func TestRepoLockParses(t *testing.T) {
 func TestVerifyArtifacts(t *testing.T) {
 	dir := t.TempDir()
 	os.MkdirAll(filepath.Join(dir, "weights"), 0o755)
-	os.WriteFile(filepath.Join(dir, "weights", "m.gguf"), []byte("weights"), 0o644)
+	os.WriteFile(filepath.Join(dir, "weights", "m.gguf"), []byte("GGUFwts"), 0o644)
 	sum, _, _ := HashFile(filepath.Join(dir, "weights", "m.gguf"))
 	m := &Model{Artifact: Source{Files: []File{{Path: "m.gguf", Size: 7, SHA256: sum}}}}
 	if p := VerifyArtifacts(m, dir, nil); len(p) != 0 {
 		t.Fatalf("good file failed: %v", p)
 	}
-	os.WriteFile(filepath.Join(dir, "weights", "m.gguf"), []byte("weightz"), 0o644)
+	os.WriteFile(filepath.Join(dir, "weights", "m.gguf"), []byte("GGUFwtz"), 0o644)
 	if p := VerifyArtifacts(m, dir, nil); len(p) != 1 {
 		t.Fatal("tampered weights passed")
 	}

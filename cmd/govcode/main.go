@@ -66,7 +66,8 @@ Setup and supply chain:
   govcode manifest -dir d -version v [-o f]   release manifest (SHA-256 of every file in d)
   govcode provenance -dir d -key k -source u -commit c -builder b   signed SLSA v1 provenance + SBOM attestation
   govcode attest verify -key pub -bundle f (-subject file | -sha256 h) [-type slsa|sbom]   offline check
-  govcode model verify -dir d [-model id] [-key pub]
+  govcode model verify -dir d [-model id] [-key pub]   hashes, formats (GGUF/safetensors only) and staging scan
+  govcode model sniff [-lock f] file...            refuse pickle-based or unknown weight formats
   govcode model smoke             one tool-call round trip against the served model
   govcode eval [-tasks dir] [-o dir] [-only id]   tool-call/task eval on legacy-code tasks
   govcode version
@@ -655,7 +656,15 @@ func cmdModel(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
-		probs := modelpin.VerifyArtifacts(m, *dir, func(p string) { fmt.Println("hashing", p) })
+		probs := m.CheckFormats()
+		probs = append(probs, modelpin.VerifyArtifacts(m, *dir, func(p string) { fmt.Println("hashing", p) })...)
+		if s := m.StagingScan; s == nil {
+			fmt.Println("  WARN no staging malware scan recorded in the lock")
+		} else if s.Result != "clean" {
+			probs = append(probs, modelpin.Problem{Path: m.ID, Msg: fmt.Sprintf("staging scan by %s %s: %s", s.Scanner, s.Version, s.Result)})
+		} else {
+			fmt.Printf("staging scan clean (%s %s, signatures %s, %s)\n", s.Scanner, s.Version, s.Signatures, s.ScannedAt)
+		}
 		for _, p := range probs {
 			fmt.Println("  FAIL", p.Path, p.Msg)
 		}
@@ -663,6 +672,38 @@ func cmdModel(ctx context.Context, args []string) error {
 			return fmt.Errorf("%d artifact(s) failed verification", len(probs))
 		}
 		fmt.Printf("%s: all artifacts match the lock\n", m.ID)
+		return nil
+	case "sniff":
+		// Used by stage-models.sh: refuse any file that is not GGUF or
+		// safetensors by content, and any lock entry naming a pickle format.
+		fs := flag.NewFlagSet("model sniff", flag.ExitOnError)
+		lock := fs.String("lock", "", "also check every lock entry's declared formats")
+		fs.Parse(args[1:])
+		bad := 0
+		if *lock != "" {
+			l, err := modelpin.Load(*lock)
+			if err != nil {
+				return err
+			}
+			for i := range l.Models {
+				for _, p := range l.Models[i].CheckFormats() {
+					fmt.Println("REFUSED", p.Path, p.Msg)
+					bad++
+				}
+			}
+		}
+		for _, f := range fs.Args() {
+			if err := modelpin.CheckWeightFile(f); err != nil {
+				fmt.Println("REFUSED", f, err)
+				bad++
+			} else {
+				kind, _ := modelpin.SniffFile(f)
+				fmt.Println("ok     ", f, kind)
+			}
+		}
+		if bad > 0 {
+			return fmt.Errorf("%d refused", bad)
+		}
 		return nil
 	case "smoke":
 		fs, pol := flags("model smoke")
