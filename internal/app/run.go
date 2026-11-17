@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/sandy-t-shelvan/govcode/internal/agent"
+	"github.com/sandy-t-shelvan/govcode/internal/analysis"
 	"github.com/sandy-t-shelvan/govcode/internal/gitx"
 	"github.com/sandy-t-shelvan/govcode/internal/llm"
 	"github.com/sandy-t-shelvan/govcode/internal/marking"
@@ -149,6 +150,22 @@ func (a *App) Run(ctx context.Context, o RunOptions) (*proposal.Proposal, error)
 	if res != nil && len(res.Changed) > 0 && len(p.Hooks.PreProposal) > 0 {
 		hookReport = env.RunHooks(ctx, "pre_proposal", p.Hooks.PreProposal, res.Changed)
 	}
+	var arep *analysis.Report
+	if res != nil && len(res.Changed) > 0 && (p.Analysis.Required || len(p.Analysis.Analyzers) > 0) {
+		arep = analysis.Run(ctx, runner, wt, p.Analysis.Analyzers, a.Analyzers, p.Analysis.UnanalyzedOK, res.Changed, p.Analysis.Timeout())
+		for _, r := range arep.Results {
+			out := r.Output
+			if env.Spill("analysis output", out) {
+				out = "[withheld: marked above repository level]"
+			}
+			sess.Record("analysis", map[string]any{"proposal": id, "tool": r.Analyzer, "path": r.Tool.Path, "sha256": r.Tool.SHA256,
+				"version": r.Tool.Version, "files": strings.Join(r.Files, ","), "exit_code": r.ExitCode, "findings": r.Findings,
+				"blocking": r.Blocking, "passed": r.Passed, "output": out})
+		}
+		if len(arep.Uncovered) > 0 {
+			sess.Record("analysis_uncovered", map[string]any{"proposal": id, "files": strings.Join(arep.Uncovered, ",")})
+		}
+	}
 	close(events)
 	<-done
 	if sess.Err != nil {
@@ -205,10 +222,29 @@ func (a *App) Run(ctx context.Context, o RunOptions) (*proposal.Proposal, error)
 			}
 		}
 	}
+	if arep != nil {
+		for _, r := range arep.Results {
+			if !r.Passed {
+				why := fmt.Sprintf("%d blocking finding(s)", r.Blocking)
+				if r.TimedOut {
+					why = "timed out"
+				} else if r.Blocking == 0 {
+					why = fmt.Sprintf("exit %d", r.ExitCode)
+				}
+				blocked = append(blocked, fmt.Sprintf("static analysis: %s failed (%s)", r.Analyzer, why))
+			}
+		}
+		if p.Analysis.Required {
+			for _, f := range arep.Uncovered {
+				blocked = append(blocked, fmt.Sprintf("static analysis: no analyzer covers %s (add one, or an analysis.unanalyzed_ok pattern)", f))
+			}
+		}
+	}
 	if len(blocked) > 0 {
 		status = proposal.StatusBlocked
 	}
 	checks := a.runChecks(env, runner.Sandboxed(), maxLevel, blocked, hookReport)
+	checks = append(checks, analysisChecks(arep, p.Analysis.Required)...)
 	prop := &proposal.Proposal{ID: id, Created: time.Now().UTC().Format(time.RFC3339), Classification: p.Classification,
 		Repo: a.Repo.Root, Task: o.Task, TaskSHA256: hex.EncodeToString(th[:]), Summary: res.Summary, Proposer: a.User,
 		Target: p.TargetBranch, Branch: branch, Base: base, Head: head, DiffSHA256: proposal.DiffHash(diff), Files: files,
@@ -352,5 +388,29 @@ func (a *App) runChecks(env *tools.Env, sandboxed bool, maxLevel marking.Level, 
 		sb = "bubblewrap"
 	}
 	cs = append(cs, proposal.Check{Name: "sandbox", Result: res(sandboxed || p.Sandbox.Mode != "required"), Detail: sb})
+	return cs
+}
+
+// analysisChecks turns the analysis report into evidence entries: tool,
+// version and hash, files and finding counts.
+func analysisChecks(r *analysis.Report, required bool) []proposal.Check {
+	if r == nil {
+		return nil
+	}
+	var cs []proposal.Check
+	for _, x := range r.Results {
+		res := "pass"
+		if !x.Passed {
+			res = "fail"
+		}
+		cs = append(cs, proposal.Check{Name: "analysis: " + x.Analyzer, Result: res,
+			Detail: fmt.Sprintf("%s sha256 %s; %d file(s), %d finding(s), %d blocking, exit %d", x.Tool.Version, x.Tool.SHA256, len(x.Files), x.Findings, x.Blocking, x.ExitCode)})
+	}
+	cov := "pass"
+	if len(r.Uncovered) > 0 && required {
+		cov = "fail"
+	}
+	cs = append(cs, proposal.Check{Name: "analysis coverage", Result: cov,
+		Detail: fmt.Sprintf("%d uncovered, %d exempt by unanalyzed_ok", len(r.Uncovered), len(r.Exempt))})
 	return cs
 }

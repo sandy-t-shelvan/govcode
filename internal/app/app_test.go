@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sandy-t-shelvan/govcode/internal/analysis"
 	"github.com/sandy-t-shelvan/govcode/internal/audit"
 	"github.com/sandy-t-shelvan/govcode/internal/identity"
 	"github.com/sandy-t-shelvan/govcode/internal/keyring"
@@ -382,5 +383,75 @@ func TestLandWritesVerifiableEvidence(t *testing.T) {
 	}
 	if _, err := a.VerifyEvidence("main~1"); err == nil {
 		t.Error("commit without evidence trailer accepted")
+	}
+}
+
+func withGCC(unanalyzedOK ...string) func(*policy.Policy) {
+	return func(p *policy.Policy) {
+		p.Analysis = policy.Analysis{Required: true, UnanalyzedOK: unanalyzedOK, Analyzers: []analysis.Analyzer{
+			{Name: "gcc-syntax", Extensions: []string{".c", ".h"}, Command: "gcc -fsyntax-only -Wall", FailOn: "error"}}}
+	}
+}
+
+func TestStaticAnalysisGate(t *testing.T) {
+	if _, err := exec.LookPath("gcc"); err != nil {
+		t.Skip("gcc not installed")
+	}
+	a, checks, err := openWorld(t, withGCC())
+	if err != nil || !hasCheck(checks, "static analysis", "PASS") {
+		t.Fatalf("%v %+v", err, checks)
+	}
+	p, err := a.Run(context.Background(), RunOptions{Task: "set port", Backend: edit("int port = 2;")})
+	if err != nil || p.Status != proposal.StatusReady {
+		t.Fatalf("clean change: %v %+v", err, p)
+	}
+	found := false
+	for _, c := range p.Checks {
+		if c.Name == "analysis: gcc-syntax" && c.Result == "pass" && strings.Contains(c.Detail, "sha256") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no analysis evidence: %+v", p.Checks)
+	}
+
+	p, err = a.Run(context.Background(), RunOptions{Task: "break it", Backend: edit("int port = ;")})
+	if err != nil || p.Status != proposal.StatusBlocked || !strings.Contains(strings.Join(p.Blocked, ";"), "static analysis: gcc-syntax failed") {
+		t.Fatalf("broken change not blocked: %v %+v", err, p)
+	}
+}
+
+func TestUnanalyzedFileBlocksWhenRequired(t *testing.T) {
+	mk := func() *llm.Scripted {
+		args, _ := json.Marshal(map[string]any{"path": "Makefile", "old_text": "\t@true", "new_text": "\t@true # ok"})
+		return &llm.Scripted{Responses: []llm.Response{
+			{ToolCalls: []llm.ToolCall{{Name: "edit_file", Args: args, Source: llm.SourceNative}}},
+			{ToolCalls: []llm.ToolCall{{Name: "run_tests", Args: json.RawMessage(`{}`), Source: llm.SourceNative}}},
+			{ToolCalls: []llm.ToolCall{{Name: "finish", Args: json.RawMessage(`{"summary":"done"}`), Source: llm.SourceNative}}},
+		}}
+	}
+	a, _, err := openWorld(t, withGCC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := a.Run(context.Background(), RunOptions{Task: "touch Makefile", Backend: mk()})
+	if err != nil || p.Status != proposal.StatusBlocked || !strings.Contains(strings.Join(p.Blocked, ";"), "no analyzer covers Makefile") {
+		t.Fatalf("uncovered file not blocked: %v %+v", err, p)
+	}
+	a, _, err = openWorld(t, withGCC("Makefile"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p, err := a.Run(context.Background(), RunOptions{Task: "touch Makefile", Backend: mk()}); err != nil || p.Status != proposal.StatusReady {
+		t.Fatalf("exempt file blocked: %v %+v", err, p)
+	}
+}
+
+func TestMissingAnalyzerFailsPreflight(t *testing.T) {
+	_, _, err := openWorld(t, func(p *policy.Policy) {
+		p.Analysis = policy.Analysis{Required: true, Analyzers: []analysis.Analyzer{{Name: "x", Extensions: []string{".c"}, Command: "no-such-analyzer-xyz"}}}
+	})
+	if err == nil || !strings.Contains(err.Error(), "static analysis") {
+		t.Fatalf("missing analyzer accepted: %v", err)
 	}
 }

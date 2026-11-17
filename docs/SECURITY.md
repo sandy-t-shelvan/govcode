@@ -56,6 +56,13 @@
 - **Site hooks** (`hooks.post_edit`, `hooks.pre_proposal`): checks the ISSO defines, such as cppcheck or GNAT style. They are defined **only** in the root-owned policy, never in the repository. They run in the same sandbox as other commands, with `GOVCODE_CHANGED_FILES` set. A failing post-edit check is reported back to the model so it can fix the problem. A failing pre-proposal check marks the proposal `blocked`. Every run and its output is audit-logged. Examples are in `deploy/hooks/`.
 - **Project memory**: `site_instructions` (a root-owned file named in policy), then the repository's root `GOVCODE.md`, both loaded into the task prompt. A subdirectory's `GOVCODE.md` is added the first time the model reads a file there. The total is capped at about an eighth of `num_ctx`. Each file's SHA-256 is audit-logged, each passes the spillage check, and a `GOVCODE.md` change the model makes goes through normal proposal review.
 
+### 2f. Mandatory static analysis (`analysis` in policy)
+- DoWI 8430.01 treats AI-generated code as unverified input that needs the same review and security testing as human code. The policy maps file extensions to analyzers, for example cppcheck for C, clang-tidy for C++, GNAT style and warnings for Ada, and `cobc -fsyntax-only` for COBOL. `deploy/policy.example.json` has working entries for all four.
+- `analysis.required` is forced on in strict mode. Every file a proposal changes must be covered by an analyzer or match an `analysis.unanalyzed_ok` glob; an uncovered file marks the proposal `blocked`.
+- Preflight resolves each analyzer binary and records its path, SHA-256 and version. A missing analyzer, or one outside the directories the sandbox can see, is a FAIL in every mode while analysis is required.
+- After the agent finishes and before the proposal is saved, each analyzer runs in the command sandbox over the files it covers. File names are passed shell-quoted and in `$GOVCODE_FILES`. A non-zero exit, a timeout, or an output line matching `fail_on` blocks the proposal. `finding` counts all findings.
+- Every run is audit-logged with tool, version, hash, files, finding and blocking counts, and the spillage-checked output. The same facts, without the output, go into the evidence record (3a).
+
 ### 2e. SIEM export and streaming
 - **SIEM** (`siem.syslog: true`): security events go to the local syslog socket `/dev/log` (a Unix datagram socket, not the network) as RFC 5424 records with structured data under `govcode@32473`:
 
