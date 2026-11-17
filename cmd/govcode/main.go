@@ -789,6 +789,7 @@ func cmdEval(ctx context.Context, args []string) error {
 	temp := fs.Float64("temperature", 0.2, "temperature")
 	turns := fs.Int("max-turns", 30, "max agent turns per task")
 	verbose := fs.Bool("verbose", false, "stream agent output")
+	toolPrompt := fs.String("tool-prompt", "", "text appended to the system prompt when tools are offered (the lock's serve.tool_prompt)")
 	fs.Parse(args)
 	cfg := eval.Config{TasksDir: *tasks, OutDir: *out, Only: *only, MaxTurns: *turns}
 	if *verbose {
@@ -796,7 +797,7 @@ func cmdEval(ctx context.Context, args []string) error {
 	} else {
 		cfg.Log = io.Discard
 	}
-	opts := llm.Options{NumCtx: *numCtx, MaxTokens: *maxTok, Temperature: *temp, Seed: 42}
+	opts := llm.Options{NumCtx: *numCtx, MaxTokens: *maxTok, Temperature: *temp, Seed: 42, ToolPrompt: *toolPrompt}
 	switch *backend {
 	case "ollama":
 		cfg.NewBackend = func() (llm.Backend, error) { return llm.NewOllama(*endpoint, *model, opts) }

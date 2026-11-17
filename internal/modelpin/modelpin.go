@@ -44,6 +44,10 @@ type Serve struct {
 	Temperature    float64 `json:"temperature"`
 	VLLMToolParser string  `json:"vllm_tool_call_parser"`
 	OllamaDigest   string  `json:"ollama_manifest_digest"`
+	// ToolPrompt, if set, is appended to the system prompt when tools are
+	// offered (see llm.Options.ToolPrompt). It is part of the signed lock
+	// because it changes how the model behaves.
+	ToolPrompt string `json:"tool_prompt,omitempty"`
 }
 
 // Lineage names a model this one was derived from (fine-tuned, distilled

@@ -18,6 +18,9 @@ import (
 //   - Qwen3-Coder XML:  <tool_call><function=NAME><parameter=K>V</parameter></function></tool_call>
 //   - Hermes/Qwen2.5:   <tool_call>{"name":..., "arguments":{...}}</tool_call>
 //   - Mistral/Devstral: [TOOL_CALLS][{"name":..., "arguments":{...}}]  or  [TOOL_CALLS]NAME[ARGS]{...}
+//   - Granite:          <|tool_call|>[{"name":..., "arguments":{...}}]  (the marker is a special
+//     token that servers usually strip, so a bare JSON list is accepted when
+//     every NAME is a known tool)
 //   - JSON block:       ```json {"name":..., "arguments":{...}} ```  (only if NAME is a known tool)
 func ExtractToolCalls(content string, tools []ToolSpec) ([]ToolCall, string) {
 	known := map[string]ToolSpec{}
@@ -31,6 +34,9 @@ func ExtractToolCalls(content string, tools []ToolSpec) ([]ToolCall, string) {
 		return number(calls), rest
 	}
 	if calls, rest := parseMistral(content, known); len(calls) > 0 {
+		return number(calls), rest
+	}
+	if calls, rest := parseGranite(content, known); len(calls) > 0 {
 		return number(calls), rest
 	}
 	if calls, rest := parseJSONBlocks(content, known); len(calls) > 0 {
@@ -162,6 +168,32 @@ func parseMistral(s string, known map[string]ToolSpec) ([]ToolCall, string) {
 		}
 	}
 	return calls, strings.TrimSpace(s[:idx])
+}
+
+const graniteMarker = "<|tool_call|>"
+
+// parseGranite reads Granite's tool-call list. Without the marker, the
+// content must be nothing but the list and every name a known tool, so that
+// ordinary JSON in a reply is not mistaken for a call.
+func parseGranite(s string, known map[string]ToolSpec) ([]ToolCall, string) {
+	t, before := strings.TrimSpace(s), ""
+	if i := strings.Index(t, graniteMarker); i >= 0 {
+		before, t = strings.TrimSpace(t[:i]), strings.TrimSpace(t[i+len(graniteMarker):])
+	} else if !strings.HasPrefix(t, "[") || !strings.HasSuffix(t, "]") {
+		return nil, s
+	}
+	var arr []nameArgs
+	if json.Unmarshal([]byte(RepairJSON(t)), &arr) != nil || len(arr) == 0 {
+		return nil, s
+	}
+	var calls []ToolCall
+	for _, na := range arr {
+		if _, ok := known[na.Name]; !ok {
+			return nil, s
+		}
+		calls = append(calls, na.toCall(SourceGranite))
+	}
+	return calls, before
 }
 
 var reFence = regexp.MustCompile("(?s)```(?:json|JSON)?\\s*\n(.*?)```")
