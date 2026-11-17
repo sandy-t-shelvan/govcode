@@ -18,6 +18,10 @@ sha256sum -c govcode-0.1.0/SHA256SUMS
 ```
 
 ```bash
+govcode-0.1.0/bin/govcode attest verify -key /media/xfer/release.pub -bundle govcode-0.1.0/provenance.intoto.jsonl -subject govcode-0.1.0/bin/govcode
+```
+
+```bash
 govcode-0.1.0/bin/govcode model verify -dir /media/xfer/models -key /media/xfer/models.pub
 ```
 

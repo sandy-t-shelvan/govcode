@@ -110,3 +110,12 @@ jobs:
         run: |
           go run ./cmd/govcode keygen -o "$RUNNER_TEMP/ci-release.key"
           scripts/build-release.sh ci "$RUNNER_TEMP/ci-release.key"
+      - name: verify build provenance and SBOM attestation offline
+        run: |
+          R=dist/govcode-ci
+          $R/bin/govcode attest verify -key "$RUNNER_TEMP/ci-release.pub" -bundle $R/provenance.intoto.jsonl -subject $R/bin/govcode
+          $R/bin/govcode attest verify -key "$RUNNER_TEMP/ci-release.pub" -bundle $R/provenance.intoto.jsonl -subject $R/vscode/govcode-ci.vsix
+          $R/bin/govcode attest verify -key "$RUNNER_TEMP/ci-release.pub" -bundle $R/sbom.intoto.jsonl -type sbom -subject $R/bin/govcode
+          # A key that did not sign the release must be refused.
+          go run ./cmd/govcode keygen -o "$RUNNER_TEMP/other.key"
+          if $R/bin/govcode attest verify -key "$RUNNER_TEMP/other.pub" -bundle $R/provenance.intoto.jsonl -subject $R/bin/govcode; then exit 1; fi

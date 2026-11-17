@@ -11,6 +11,7 @@
 | FIPS 140-3 crypto | `GOFIPS140=v1.0.0` links Go Cryptographic Module v1.0.0, which the Go 1.27.4 toolchain lists as **certified** (`$(go env GOROOT)/lib/fips140/certified.txt` → `v1.0.0-c2097c7c`); `go version -m` shows `DefaultGODEBUG=fips140=on`. Ed25519 (FIPS 186-5) and SHA-256 are the only algorithms in use. Record the CMVP certificate number in the ATO package. |
 | Patched toolchain | `go.mod` requires Go `1.27.4`, so older toolchains refuse to build. Go 1.24.7 had 36 reachable standard-library vulnerabilities; govulncheck reports none for 1.27.4 and runs in CI on every PR. |
 | Signed | `manifest.json` lists every file in the release with its SHA-256 and is signed with the release key (`manifest.json.sig`). |
+| Build provenance | `provenance.intoto.jsonl` is an in-toto Statement v1 with a SLSA v1.0 provenance predicate, in a DSSE envelope signed (Ed25519) by the release key. Its subjects are every release file. It records the source repository and commit, whether the tree was clean, the Go version and the SHA-256 of the `go` tool, the build environment, and the reproducibility result. `sbom.intoto.jsonl` binds `sbom.cdx.json` to the binary and VSIX digests. |
 | Self-check at runtime | In strict mode, `govcode` hashes its own executable and refuses to run unless that hash is in the signed manifest. |
 
 Build a release on a clean, connected-but-controlled build host:
@@ -22,6 +23,22 @@ govcode keygen -o /secure/release.key
 ```bash
 scripts/build-release.sh 0.1.0 /secure/release.key
 ```
+
+### Verifying provenance offline
+
+On the high side, with only the release directory and the release public key:
+
+```bash
+govcode attest verify -key release.pub -bundle provenance.intoto.jsonl -subject bin/govcode
+```
+
+```bash
+govcode attest verify -key release.pub -bundle sbom.intoto.jsonl -type sbom -subject bin/govcode
+```
+
+Each prints `PASS`, the subject and the signing key, plus the builder and source commit. Any other result is a failure. The envelopes follow the DSSE v1 and in-toto v1 specifications, so standard tools that accept an Ed25519 key can check them too. Because the build is reproducible, the strongest check is to rebuild from the recorded commit and compare your hash with the subject.
+
+With `trust.release_provenance` set in the policy, `govcode verify` and every start check the provenance signature and that the running binary is a subject. A failure is fatal in every mode. Strict mode warns when it is not set.
 
 ## SBOM
 

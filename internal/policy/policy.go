@@ -78,8 +78,11 @@ type Trust struct {
 	Enforce         string   `json:"enforce"` // strict | warn
 	ReleaseKeys     []string `json:"release_keys"`
 	ReleaseManifest string   `json:"release_manifest"`
-	ModelKeys       []string `json:"model_keys"`
-	KeyringDir      string   `json:"keyring_dir"`
+	// ReleaseProvenance is the signed SLSA v1 provenance bundle
+	// (provenance.intoto.jsonl) shipped with the release.
+	ReleaseProvenance string   `json:"release_provenance,omitempty"`
+	ModelKeys         []string `json:"model_keys"`
+	KeyringDir        string   `json:"keyring_dir"`
 }
 
 // Permissions are allow/ask/deny rules, e.g. "run_command(make *)",
@@ -270,6 +273,9 @@ func (p *Policy) validate() ([]string, error) {
 	if p.Strict() {
 		if len(p.Trust.ReleaseKeys) == 0 || p.Trust.ReleaseManifest == "" {
 			return nil, fmt.Errorf("strict mode requires trust.release_keys and trust.release_manifest")
+		}
+		if p.Trust.ReleaseProvenance == "" {
+			warn = append(warn, "trust.release_provenance is not set: build provenance (SLSA v1) is not checked")
 		}
 		if len(p.Trust.ModelKeys) == 0 || p.Model.Lock == "" {
 			return nil, fmt.Errorf("strict mode requires trust.model_keys and model.lock")

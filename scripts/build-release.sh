@@ -14,6 +14,7 @@ set -euo pipefail
 VERSION=${1:?version}; KEY=${2:?release signing key}
 ROOT=$(cd "$(dirname "$0")/.." && pwd); cd "$ROOT"
 OUT=dist/govcode-$VERSION
+STARTED=$(date +%s)
 rm -rf "$OUT"; mkdir -p "$OUT/bin"
 
 export CGO_ENABLED=0 GOOS=${GOOS:-linux} GOARCH=${GOARCH:-amd64}
@@ -41,5 +42,16 @@ scripts/package-vsix.sh "$OUT/vscode/govcode-$VERSION.vsix"
 "$OUT/bin/govcode" aibom -lock models/models.lock.json -o "$OUT/aibom.cdx.json"
 "$OUT/bin/govcode" manifest -dir "$OUT" -version "$VERSION"
 "$OUT/bin/govcode" sign -key "$KEY" "$OUT/manifest.json"
+# SLSA v1 build provenance and SBOM attestation (in-toto, DSSE, Ed25519).
+GO_SHA=$(sha256sum "$(go env GOROOT)/bin/go" | cut -d' ' -f1)
+CLEAN=false; git diff --quiet HEAD -- 2>/dev/null && [ -z "$(git ls-files --others --exclude-standard)" ] && CLEAN=true
+"$OUT/bin/govcode" provenance -dir "$OUT" -key "$KEY" -version "$VERSION" \
+  -source "git+$(git config --get remote.origin.url 2>/dev/null || echo "file://$ROOT")" \
+  -commit "$(git rev-parse HEAD)" -clean=$CLEAN \
+  -go-version "$(go version)" -go-sha256 "$GO_SHA" \
+  -reproducible -repro-sha256 "$a" -started "$STARTED" \
+  -builder "${GOVCODE_BUILDER_ID:-host://$(hostname -f 2>/dev/null || hostname)/build-release.sh}" \
+  -env CGO_ENABLED=$CGO_ENABLED -env GOOS=$GOOS -env GOARCH=$GOARCH -env GOFIPS140=$GOFIPS140 \
+  -env GOFLAGS=$GOFLAGS -env GOPROXY=$GOPROXY -env "LDFLAGS=$LDFLAGS"
 ( cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS )
 echo "release: $OUT"
