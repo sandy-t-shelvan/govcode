@@ -20,9 +20,14 @@ Mirrors Jira project **GOV**: one epic per phase, one story per feature. Each st
 | GOV-14 Classified hardening | GOV-28 spillage guard, GOV-29 secret scan | Done (PR #3) |
 | | GOV-30 SIEM export | Done (PR #6) |
 | | GOV-31 PIV/CAC signing | **To do** (needs smart-card hardware to test) |
+| GOV-32 Classified deployment readiness | GOV-33 Devstral default + model-origin policy | Done (PR #7) |
+| | GOV-34 SLSA v1 / in-toto build provenance | PR #8 |
+| | GOV-35 per-change AI evidence record | Built; PR after #8 |
+| | GOV-36 mandatory static analysis | Built; PR after GOV-35 |
+| | GOV-37 ATO package generator, GOV-38 refuse pickle-format weights, GOV-39 RHEL packaging on a STIG host | **To do** (P1) |
 
 ## The 1-week proof
-1. **Day 1–2:** stage Qwen3-Coder-30B-A3B Q4_K_M on the low side, transfer it, run `govcode model verify`.
+1. **Day 1–2:** stage Devstral-Small-2507 Q4_K_M (and Qwen3-Coder only if the AO grants an origin exception) on the low side, transfer it, run `govcode model verify`.
 2. **Day 2:** install per DEPLOYMENT.md; `govcode verify` must be all PASS. Run `scripts/e2e/two-person.sh` on a scratch VM, and install the VSIX in VS Code.
-3. **Day 3:** run `govcode eval` on Qwen3-Coder and on Devstral. Go/no-go: ≥ 95% valid tool calls and ≥ 7/10 tasks passed.
+3. **Day 3:** run `govcode eval` on Devstral (and Qwen3-Coder if excepted). Go/no-go: ≥ 95% valid tool calls and ≥ 7/10 tasks passed.
 4. **Day 4–5:** real tickets on the customer repository through plan → run → review → approve, from the CLI and from VS Code. Run `govcode audit verify` daily and confirm the events arrive in the SIEM.
