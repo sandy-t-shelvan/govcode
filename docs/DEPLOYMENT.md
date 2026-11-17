@@ -29,6 +29,53 @@ The second command checks the lock signature and then re-hashes every weight fil
 
 ## 2. Install
 
+### RHEL 8 or 9: RPM (recommended)
+
+Build the RPMs on a RHEL build host of the **same major version** as the target, with `rpm-build` and `selinux-policy-devel` installed:
+
+```bash
+scripts/build-rpm.sh dist/govcode-0.1.0 dist/rpm
+```
+
+The script does not rebuild govcode. It packages the signed release binary unmodified (no strip, no debuginfo, no build-id), and fails unless the binary inside the RPM has the SHA-256 recorded in the signed manifest. Only the SELinux module is compiled, against the build host's policy. Sign the RPMs with your site's RPM signing key (`rpmsign --addsign`) before transfer, then on the target:
+
+```bash
+dnf install ./govcode-0.1.0-1.el9.x86_64.rpm ./govcode-selinux-0.1.0-1.el9.noarch.rpm
+```
+
+```bash
+rpm -V govcode govcode-selinux
+```
+
+The RPMs install:
+
+| Package | Contents |
+|---|---|
+| `govcode` | `/usr/bin/govcode`; the signed manifest, provenance, SBOM, AI-BOM, deploy files and docs under `/usr/share/govcode`; site checks under `/usr/libexec/govcode/hooks`; `govcode-ollama.service` (installed, not enabled); `/etc/govcode/policy.json.example`; root-owned `/etc/govcode/{trust,keys}`; `/var/lib/govcode` (mode 2770, group `govcode`) with an **empty audit log already set `chattr +a`** |
+| `govcode-selinux` | The SELinux policy module |
+| `govcode-vscode` | The offline VSIX, under `/usr/share/govcode/vscode` |
+
+Add proposers and approvers to the `govcode` group, and set `state_dir` to `/var/lib/govcode` and `audit.require_append_only` to `true`. With a release key, `build-rpm.sh` also writes a signed `SHA256SUMS` over the RPMs.
+
+**User namespaces (bubblewrap).** The command sandbox needs unprivileged user namespaces. The RHEL 8 STIG includes a rule that disables them (`user.max_user_namespaces = 0`) unless the system has a documented need. You have two choices:
+
+- Document the need and set the value, for example in `/etc/sysctl.d/90-govcode.conf`:
+
+  ```
+  user.max_user_namespaces = 1024
+  ```
+
+  Then run `sysctl --system`. Record the deviation and its justification in the SSP: the sandbox is the control that keeps model-written commands away from the network, `$HOME` and other repositories.
+- Keep the STIG value. Then `sandbox.mode: required` makes govcode refuse to run, which is the correct fail-safe. `best-effort` would run commands unsandboxed and record `sandbox=none`, which is not acceptable for classified use.
+
+The SELinux module labels `/etc/govcode` as `govcode_conf_t` (read-only for `user_t` and `staff_t`) and `/var/lib/govcode` as `govcode_var_lib_t`. Point `trust.release_manifest` at `/usr/share/govcode/manifest.json` and `trust.release_provenance` at `/usr/share/govcode/provenance.intoto.jsonl`.
+
+On a STIG-hardened host set `"host": {"require_fips": true, "require_selinux": true}`. govcode then refuses to start unless kernel FIPS mode is on (`fips-mode-setup --check`), the binary is a FIPS-mode release build, and SELinux is enforcing.
+
+> **Status:** the RPM build, the binary-hash check and the SELinux module compile are tested in CI on Ubuntu. Installing and running on a STIG-hardened RHEL host with FIPS and SELinux enforcing **has not been done yet** (GOV-39). Report AVC denials from `ausearch -m avc -c govcode`.
+
+### Any Linux: tarball
+
 ```bash
 install -d -m 755 /opt/govcode/bin /opt/govcode/models /etc/govcode/trust /etc/govcode/keys
 ```

@@ -124,6 +124,13 @@ func (a Analysis) Timeout() time.Duration {
 	return time.Duration(a.TimeoutSeconds) * time.Second
 }
 
+// Host are platform requirements checked at every start. On a STIG-hardened
+// RHEL host both should be true.
+type Host struct {
+	RequireFIPS    bool `json:"require_fips"`    // kernel FIPS mode and a FIPS-mode binary
+	RequireSELinux bool `json:"require_selinux"` // SELinux enforcing
+}
+
 // SIEM exports security events to the local syslog socket.
 type SIEM struct {
 	Syslog bool   `json:"syslog"`
@@ -162,6 +169,7 @@ type Policy struct {
 	RequirePlanApproval bool     `json:"require_plan_approval,omitempty"`
 	SIEM                SIEM     `json:"siem"`
 	Analysis            Analysis `json:"analysis"`
+	Host                Host     `json:"host"`
 	Sandbox             Sandbox  `json:"sandbox"`
 	Trust               Trust    `json:"trust"`
 	Audit               Audit    `json:"audit"`
