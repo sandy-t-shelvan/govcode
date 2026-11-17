@@ -297,8 +297,9 @@ func (s *Server) cancelRun() bool {
 }
 
 type runParams struct {
-	Task string `json:"task"`
-	Plan bool   `json:"plan"`
+	Task   string `json:"task"`
+	Plan   bool   `json:"plan"`
+	Resume string `json:"resume,omitempty"` // continue an interrupted run; Task is then a follow-up
 }
 
 // eventWriter turns the agent's text output into "event" notifications.
@@ -350,8 +351,8 @@ func (s *Server) run(ctx context.Context, raw json.RawMessage) (any, error) {
 		return nil, err
 	}
 	var p runParams
-	if err := json.Unmarshal(raw, &p); err != nil || strings.TrimSpace(p.Task) == "" {
-		return nil, fail(codeParams, "run needs {\"task\": \"...\"}")
+	if err := json.Unmarshal(raw, &p); err != nil || (strings.TrimSpace(p.Task) == "" && p.Resume == "") {
+		return nil, fail(codeParams, "run needs {\"task\": \"...\"} or {\"resume\": \"<id>\", \"task\": \"optional follow-up\"}")
 	}
 	s.runMu.Lock()
 	if s.runCancel != nil {
@@ -367,7 +368,7 @@ func (s *Server) run(ctx context.Context, raw json.RawMessage) (any, error) {
 		s.runMu.Unlock()
 		cancel()
 	}()
-	opts := app.RunOptions{Task: p.Task, Plan: p.Plan, Interactive: true,
+	opts := app.RunOptions{Task: p.Task, Plan: p.Plan, Resume: p.Resume, Interactive: true,
 		Approver: rpcApprover{s, rctx}, PlanReviewer: rpcPlanReviewer{s, rctx},
 		OnEvent: func(kind string, data any) { s.notify("event", map[string]any{"kind": kind, "data": data}) },
 		OnToken: func(t string) { s.notify("event", map[string]any{"kind": "token", "text": t}) }}

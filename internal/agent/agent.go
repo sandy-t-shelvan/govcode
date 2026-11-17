@@ -37,7 +37,18 @@ type Config struct {
 	// generated, one complete line at a time. Each line passes the spillage
 	// check before it is released.
 	OnToken func(string)
+	// History, when set (resume), is the conversation to continue instead
+	// of a fresh system and task message. A plan already approved in it
+	// stays approved.
+	History []llm.Message
+	// OnTurn receives a copy of the conversation after every turn, so the
+	// caller can persist it for resume.
+	OnTurn func(msgs []llm.Message)
 }
+
+// approvedPlanMarker is written into the task message when a plan is
+// approved; it survives in saved history.
+const approvedPlanMarker = "\nAPPROVED PLAN (follow it; do not expand the scope):\n"
 
 // PlanReviewer is the human who approves the plan in plan mode.
 type PlanReviewer interface {
@@ -133,15 +144,31 @@ func (a *Agent) Run(ctx context.Context, task string, rc RepoContext) (*Result, 
 		}
 		return out, by
 	}
+	var msgs []llm.Message
+	if len(a.Cfg.History) >= 2 {
+		msgs = append([]llm.Message(nil), a.Cfg.History...)
+		if planning && strings.Contains(msgs[1].Content, approvedPlanMarker) {
+			planning = false
+		}
+	} else {
+		msgs = []llm.Message{
+			{Role: llm.RoleSystem, Content: systemPrompt},
+			{Role: llm.RoleUser, Content: taskPrompt(task, rc)},
+		}
+		if planning {
+			msgs[1].Content += "\nPLAN MODE: you can only read code. Explore, then call propose_plan. Edit tools unlock after a human approves your plan.\n"
+		}
+	}
 	specs, specByName := specsFor(planning)
 	opts := a.Backend.Options()
-	msgs := []llm.Message{
-		{Role: llm.RoleSystem, Content: systemPrompt},
-		{Role: llm.RoleUser, Content: taskPrompt(task, rc)},
+	turnDone := func() {
+		if a.Cfg.OnTurn != nil {
+			a.Cfg.OnTurn(append([]llm.Message(nil), msgs...))
+		}
 	}
-	if planning {
-		msgs[1].Content += "\nPLAN MODE: you can only read code. Explore, then call propose_plan. Edit tools unlock after a human approves your plan.\n"
-	}
+	// Report the starting conversation too, so a run whose first model
+	// request fails can still be resumed.
+	turnDone()
 	m := Metrics{ParsedBy: map[string]int{}}
 	nags := 0
 	env := a.Tools.Env
@@ -203,6 +230,7 @@ func (a *Agent) Run(ctx context.Context, task string, rc RepoContext) (*Result, 
 			}
 			msgs = append(msgs, llm.Message{Role: llm.RoleAssistant, Content: recorded},
 				llm.Message{Role: llm.RoleUser, Content: "You did not call a tool. Continue the task by calling a tool now. If the task is complete and tests pass, call finish."})
+			turnDone()
 			continue
 		}
 		nags = 0
@@ -244,6 +272,7 @@ func (a *Agent) Run(ctx context.Context, task string, rc RepoContext) (*Result, 
 		asst.ToolCalls = calls[:len(results)]
 		msgs = append(msgs, asst)
 		msgs = append(msgs, results...)
+		turnDone()
 		if env.Finished {
 			m.Finished = true
 			m.StopReason = "finished"
@@ -289,7 +318,7 @@ func (a *Agent) reviewPlan(c *llm.ToolCall, planning bool, m *Metrics, msgs []ll
 	}
 	a.Tools.Env.Plan = steps
 	var b strings.Builder
-	b.WriteString("\nAPPROVED PLAN (follow it; do not expand the scope):\n")
+	b.WriteString(approvedPlanMarker)
 	for i, s := range steps {
 		fmt.Fprintf(&b, "%d. %s\n", i+1, s)
 	}

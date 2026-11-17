@@ -40,6 +40,9 @@ const usage = `govcode - air-gapped coding agent for legacy code
 
 Developer:
   govcode run [--plan] "<task>"   run the agent; produces a signed proposal (never touches the target branch)
+  govcode run --resume <id> ["follow-up"]   continue an interrupted run (same proposal and audit session)
+  govcode runs                    list interrupted runs that can be resumed
+  govcode rewind <id> [n]         list checkpoints, or restore the worktree to checkpoint n (0 = base)
   govcode proposals               list proposals
   govcode review <id>             show a proposal: summary, tests, diff, audit trail
 
@@ -119,6 +122,10 @@ func main() {
 		err = cmdSign(args)
 	case "evidence":
 		err = cmdEvidence(args)
+	case "rewind":
+		err = cmdRewind(args)
+	case "runs":
+		err = cmdRuns(args)
 	case "ato":
 		err = cmdATO(args)
 	case "provenance":
@@ -175,10 +182,11 @@ func cmdRun(ctx context.Context, args []string) error {
 	verbose := fs.Bool("verbose", false, "show tool output")
 	yes := fs.Bool("non-interactive", false, "never prompt; non-allowlisted commands are denied")
 	plan := fs.Bool("plan", false, "plan mode: read-only until you approve the model's plan")
+	resume := fs.String("resume", "", "continue an interrupted run; any text given is a follow-up message")
 	pos := parse(fs, args)
 	task := strings.Join(pos, " ")
-	if strings.TrimSpace(task) == "" {
-		return errors.New(`usage: govcode run "<task>"`)
+	if strings.TrimSpace(task) == "" && *resume == "" {
+		return errors.New(`usage: govcode run "<task>" | govcode run --resume <id> ["follow-up"]`)
 	}
 	a, checks, err := app.Open(*pol, os.Stdout, true)
 	if err != nil {
@@ -189,7 +197,7 @@ func cmdRun(ctx context.Context, args []string) error {
 		fmt.Fprintln(os.Stderr, "warning:", w)
 	}
 	banner(a)
-	p, err := a.Run(ctx, app.RunOptions{Task: task, Interactive: !*yes, Verbose: *verbose, Plan: *plan,
+	p, err := a.Run(ctx, app.RunOptions{Task: task, Interactive: !*yes, Verbose: *verbose, Plan: *plan, Resume: *resume,
 		OnToken: func(s string) { fmt.Print(s) }})
 	if p != nil {
 		fmt.Printf("\nProposal %s: %s\n  branch %s (%s..%s)\n  files: %s\n  tests: %s runs=%d passed=%v\n",
@@ -1131,5 +1139,64 @@ func cmdATO(args []string) error {
 		fmt.Printf("== %s ==\n", in.Classification)
 	}
 	fmt.Printf("wrote %d files to %s\n%s\n", len(files), *out, ato.Disclaimer)
+	return nil
+}
+
+func cmdRuns(args []string) error {
+	fs, pol := flags("runs")
+	parse(fs, args)
+	a, checks, err := app.Open(*pol, os.Stdout, false)
+	if err != nil {
+		printChecks(checks)
+		return err
+	}
+	rs, err := a.Runs.List()
+	if err != nil {
+		return err
+	}
+	if len(rs) == 0 {
+		fmt.Println("no interrupted runs")
+		return nil
+	}
+	tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
+	fmt.Fprintln(tw, "ID\tSTATUS\tPROPOSER\tCHECKPOINTS\tUPDATED\tTASK")
+	for _, r := range rs {
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\t%s\n", r.ID, r.Status, r.Proposer, r.Checkpoints, r.Updated, oneLine(r.Task, 60))
+	}
+	return tw.Flush()
+}
+
+func cmdRewind(args []string) error {
+	fs, pol := flags("rewind")
+	pos := parse(fs, args)
+	if len(pos) < 1 || len(pos) > 2 {
+		return errors.New("usage: govcode rewind <id> [n]")
+	}
+	a, checks, err := app.Open(*pol, os.Stdout, true)
+	if err != nil {
+		printChecks(checks)
+		return err
+	}
+	banner(a)
+	if len(pos) == 1 {
+		st, cs, err := a.Checkpoints(pos[0])
+		if err != nil {
+			return err
+		}
+		fmt.Printf("run %s (%s), base %.10s\n  0  base\n", st.ID, st.Status, st.Base)
+		for _, c := range cs {
+			fmt.Printf("  %d  %.10s  %s\n", c.N, c.Commit, strings.Join(c.Files, ", "))
+		}
+		return nil
+	}
+	var n int
+	if _, err := fmt.Sscan(pos[1], &n); err != nil || n < 0 {
+		return fmt.Errorf("checkpoint must be a number >= 0")
+	}
+	files, err := a.Rewind(pos[0], n)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("rewound %s to checkpoint %d; changed files: %s\nResume: govcode run --resume %s\n", pos[0], n, strings.Join(files, ", "), pos[0])
 	return nil
 }

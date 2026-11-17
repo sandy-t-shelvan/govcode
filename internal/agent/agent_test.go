@@ -116,3 +116,29 @@ func TestBudgetKeepsSystemAndTask(t *testing.T) {
 		t.Fatal("most recent tool output was elided")
 	}
 }
+
+func TestHistoryResumesWithApprovedPlanAndOnTurn(t *testing.T) {
+	env := fixture(t)
+	env.RequireTest = false
+	be := &llm.Scripted{Responses: []llm.Response{
+		{ToolCalls: []llm.ToolCall{{Name: "finish", Args: json.RawMessage(`{"summary":"ok"}`), Source: llm.SourceNative}}}}}
+	var turns int
+	ag := &Agent{Backend: be, Tools: tools.NewSet(env), Cfg: Config{PlanMode: true,
+		History: []llm.Message{{Role: llm.RoleSystem, Content: "sys"}, {Role: llm.RoleUser, Content: "task" + approvedPlanMarker + "1. do it\n"},
+			{Role: llm.RoleUser, Content: "resumed"}},
+		OnTurn: func(m []llm.Message) { turns++ }}}
+	ag.PlanReviewer = rejectAll{}
+	if _, err := ag.Run(context.Background(), "ignored", RepoContext{}); err != nil {
+		t.Fatal(err)
+	}
+	if turns != 2 || len(be.Seen) != 1 || be.Seen[0][2].Content != "resumed" {
+		t.Fatalf("turns=%d seen=%+v", turns, be.Seen)
+	}
+	if !env.Finished {
+		t.Fatal("finish was not available: an approved plan in history must unlock tools")
+	}
+}
+
+type rejectAll struct{}
+
+func (rejectAll) ReviewPlan([]string, string) (bool, string) { return false, "no" }
