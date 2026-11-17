@@ -19,7 +19,7 @@ govcode began as a fork of [OpenCode](https://github.com/opencode-ai/opencode) (
 | 2. Agent loop on legacy code | Implemented | `internal/agent`, `internal/tools`, tests for the full plan→edit→fail→fix→pass loop |
 | 3. Signed audit log | Implemented | `internal/audit`; tests for modified, deleted and truncated entries, impersonation, and object tampering |
 | 4. SBOM and signed supply chain | Implemented | `scripts/build-release.sh`, `govcode sbom`, `govcode verify`, `internal/supply/nonetwork_test.go` |
-| 5. Approval and access control | Implemented | `internal/proposal`, `internal/policy`; multi-user acceptance script `scripts/e2e/two-person.sh` (**not yet run**: it creates OS users, so run it in a disposable VM) |
+| 5. Approval and access control | Implemented | `internal/proposal`, `internal/policy`; multi-user acceptance script `scripts/e2e/two-person.sh` (33/33 in CI; it creates OS users, so run it only in a disposable VM) |
 
 ## How a change happens
 

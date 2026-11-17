@@ -18,7 +18,7 @@ const Disclaimer = "CONTRACTOR SELF-ASSESSMENT - NOT AN AUTHORIZATION. Generated
 // scripts/ci/fuzz.sh). TestFuzzTargetsListed keeps this list complete.
 var FuzzTargets = []string{
 	"FuzzAllowlisted", "FuzzDecideNeverAllowsMeta", "FuzzExtractToolCalls", "FuzzFormat", "FuzzJailResolve",
-	"FuzzLoad", "FuzzOutline", "FuzzRepairJSON", "FuzzScan", "FuzzScanDiff", "FuzzServeInput", "FuzzSniff",
+	"FuzzLoad", "FuzzNonStreamReply", "FuzzOutline", "FuzzRepairJSON", "FuzzScan", "FuzzScanDiff", "FuzzServeInput", "FuzzSniff",
 	"FuzzValidateArgs", "FuzzVerifyAttestation", "FuzzVerifyGarbage",
 }
 

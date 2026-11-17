@@ -489,3 +489,34 @@ func TestPickleLockEntryAndDirtyScanFailPreflight(t *testing.T) {
 		t.Fatalf("%v %+v", err, checks)
 	}
 }
+
+// Outside any work tree govcode falls back to the policy's repository, but a
+// work tree git refuses to open (another owner, a broken .git) is refused,
+// never silently swapped for the granted repository.
+func TestOpenDoesNotSwapAnUnopenableRepo(t *testing.T) {
+	a, _, err := openWorld(t, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pol, granted := a.Policy.Path, a.Repo.Root
+	base := t.TempDir()
+
+	plain := filepath.Join(base, "plain")
+	os.MkdirAll(plain, 0o755)
+	os.Chdir(plain)
+	b, _, err := Open(pol, io.Discard, true)
+	if err != nil {
+		t.Fatalf("outside a work tree: %v", err)
+	}
+	if b.Repo.Root != granted {
+		t.Fatalf("fallback repo %s, want %s", b.Repo.Root, granted)
+	}
+
+	other := filepath.Join(base, "other")
+	os.MkdirAll(filepath.Join(other, "sub"), 0o755)
+	os.WriteFile(filepath.Join(other, ".git"), []byte("gitdir: /nonexistent\n"), 0o644)
+	os.Chdir(filepath.Join(other, "sub"))
+	if _, _, err := Open(pol, io.Discard, true); err == nil || !strings.Contains(err.Error(), "grants access only to") {
+		t.Fatalf("unopenable repo: err = %v, want a refusal", err)
+	}
+}

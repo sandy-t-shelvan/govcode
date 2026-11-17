@@ -30,17 +30,20 @@ groupadd -f $G
 for u in alice bob carol; do id $u >/dev/null 2>&1 || useradd -m -s /bin/bash $u; usermod -aG $G $u; done
 mkdir -p $W/opt/bin $W/etc/trust $W/keys $W/state/audit $W/models $W/repo
 cp "$REL/bin/govcode" $W/opt/bin/govcode; chmod 755 $W/opt/bin/govcode
-cp "$REL/manifest.json" "$REL/manifest.json.sig" $W/etc/trust/
-cp "${RELKEY%.key}.pub" $W/etc/trust/release.pub
+# The ISSO installs trust material world-readable, as in DEPLOYMENT.md;
+# govcode writes its own files under umask 007, so cp would leave them 0640.
+install -m 644 "$REL/manifest.json" "$REL/manifest.json.sig" $W/etc/trust/
+install -m 644 "${RELKEY%.key}.pub" $W/etc/trust/release.pub
 GC=$W/opt/bin/govcode
 
 $GC keygen -o $W/etc/trust/models.key >/dev/null
 cat > $W/models/models.lock.json <<JSON
 {"schema":"govcode.models.lock/v1","models":[{"id":"fake-coder","default":true,"name":"fake-coder","license":"MIT","publisher":"test",
- "upstream":{"repo":"none","revision":"none","files":[]},"artifact":{"format":"none","files":[]},
+ "upstream":{"repo":"none","revision":"none","files":[]},"artifact":{"format":"gguf","files":[]},
  "serve":{"ollama_name":"","num_ctx":16384,"max_tokens":2048,"temperature":0,"vllm_tool_call_parser":"","ollama_manifest_digest":""}}]}
 JSON
 $GC sign -key $W/etc/trust/models.key $W/models/models.lock.json >/dev/null
+chmod 644 $W/etc/trust/models.pub $W/models/models.lock.json*
 
 cp -r "$ROOT/eval/tasks/01-c-buffer-overflow/repo/." $W/repo/
 git -C $W/repo init -q -b main && git -C $W/repo config core.sharedRepository group
@@ -75,7 +78,9 @@ cat > $W/etc/policy.json <<JSON
   "sandbox": {"mode": "required"},
   "trust": {"enforce": "strict", "release_keys": ["$W/etc/trust/release.pub"], "release_manifest": "$W/etc/trust/manifest.json",
             "model_keys": ["$W/etc/trust/models.pub"], "keyring_dir": "$W/keys"},
-  "audit": {"require_append_only": true}
+  "audit": {"require_append_only": true},
+  "analysis": {"required": true, "analyzers": [{"name": "gcc-c89", "extensions": [".c", ".h"],
+               "command": "gcc -fsyntax-only -std=c89 -pedantic -Wall -Wextra", "fail_on": ": (error|warning):"}]}
 }
 JSON
 chmod 644 $W/etc/policy.json
@@ -116,14 +121,19 @@ echo "== audit"
 expect_ok "audit verify: chain, signatures, objects, anchors" as bob "$GC audit verify"
 as bob "$GC audit show -session $ID -n 500" > $W/trail.txt
 for k in task model_response tool_result proposal approval landed; do grep -q " $k" $W/trail.txt && ok "trail has $k" || bad "trail missing $k"; done
-L=$W/state/audit/log.jsonl; cp $L $W/log.bak; chattr -a $L
-sed -i '3s/"kind":"model_response"/"kind":"model_respons3"/' $L
+# An attacker with root edits the log and restores the append-only flag, so
+# preflight still passes and only the hash chain and anchors can catch it.
+L=$W/state/audit/log.jsonl; cp $L $W/log.bak
+chattr -a $L; sed -i '0,/"kind":"model_response"/s//"kind":"model_respons3"/' $L; chattr +a $L
+grep -q model_respons3 $L || bad "tamper step did not modify the log"
 expect_fail "modified audit entry is detected" "content does not match" as bob "$GC audit verify --no-objects"
-head -n 4 $W/log.bak > $L
+chattr -a $L; head -n 4 $W/log.bak > $L; chattr +a $L
 expect_fail "truncated audit log is detected via commit anchor" "missing from the log" as bob "$GC audit verify --no-objects"
-cat $W/log.bak > $L; chattr +a $L
+chattr -a $L; cat $W/log.bak > $L; chattr +a $L
 
 echo "== integrity of a second proposal"
+# The fake model replays the same fix, so put the defect back on main first.
+git -C $W/repo -c user.name=root -c user.email=root@localhost revert --no-edit -m 1 HEAD >/dev/null
 out=$(as alice "$GC run --non-interactive 'same fix, second attempt'" 2>&1)
 ID2=$(grep -oE 'Proposal p[0-9-]+[0-9a-f]+' <<<"$out" | head -1 | awk '{print $2}')
 if [ -n "$ID2" ]; then

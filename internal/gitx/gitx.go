@@ -6,6 +6,7 @@ package gitx
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -48,6 +49,27 @@ func Open(dir string) (*Repo, error) {
 		root = filepath.Dir(common)
 	}
 	return &Repo{Root: root, CommonDir: common}, nil
+}
+
+// FindTop returns the nearest directory at or above dir that contains a
+// .git entry (directory, or file for a linked worktree), without running
+// git. It reports whether dir is inside a work tree even when git itself
+// refuses to open it (for example "dubious ownership").
+func FindTop(dir string) (string, bool) {
+	d, err := filepath.Abs(dir)
+	if err != nil {
+		return "", false
+	}
+	for {
+		if _, err := os.Lstat(filepath.Join(d, ".git")); err == nil {
+			return d, true
+		}
+		parent := filepath.Dir(d)
+		if parent == d {
+			return "", false
+		}
+		d = parent
+	}
 }
 
 func (r *Repo) Git(args ...string) (string, error) { return Git(r.Root, args...) }

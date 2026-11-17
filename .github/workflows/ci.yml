@@ -119,6 +119,10 @@ jobs:
           # A key that did not sign the release must be refused.
           go run ./cmd/govcode keygen -o "$RUNNER_TEMP/other.key"
           if $R/bin/govcode attest verify -key "$RUNNER_TEMP/other.pub" -bundle $R/provenance.intoto.jsonl -subject $R/bin/govcode; then exit 1; fi
+      - name: two-person approval e2e with real OS users (GOV-41)
+        # Creates alice/bob/carol on the disposable runner and drives the signed
+        # release through propose, review, approve, audit and tamper checks.
+        run: sudo bash scripts/e2e/two-person.sh dist/govcode-ci "$RUNNER_TEMP/ci-release.key"
       - name: RHEL RPM packaging (packaged binary must equal the signed one)
         run: |
           sudo apt-get install -y -qq rpm cpio selinux-policy-dev
