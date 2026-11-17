@@ -23,6 +23,7 @@ import (
 	"github.com/sandy-t-shelvan/govcode/internal/modelpin"
 	"github.com/sandy-t-shelvan/govcode/internal/policy"
 	"github.com/sandy-t-shelvan/govcode/internal/proposal"
+	"github.com/sandy-t-shelvan/govcode/internal/runstate"
 	"github.com/sandy-t-shelvan/govcode/internal/siem"
 	"github.com/sandy-t-shelvan/govcode/internal/sign"
 	"github.com/sandy-t-shelvan/govcode/internal/supply"
@@ -43,6 +44,7 @@ type App struct {
 	// but the policy records an AO exception for it; every task records it.
 	OriginException *policy.OriginException
 	Evidence        evidence.Store
+	Runs            runstate.Store
 	Analyzers       []analysis.Tool // resolved at preflight, in policy order
 	Out             io.Writer
 	Warnings        []string
@@ -237,6 +239,7 @@ func Open(policyPath string, out io.Writer, needSigner bool) (*App, []Check, err
 	}
 	a.Store = proposal.Store{Dir: filepath.Join(p.StateDir, "proposals")}
 	a.Evidence = evidence.Store{Dir: filepath.Join(p.StateDir, "evidence")}
+	a.Runs = runstate.Store{Dir: filepath.Join(p.StateDir, "runs")}
 
 	for _, c := range checks {
 		if c.Status == "FAIL" && (p.Strict() || isAlwaysFatal(c.Name)) {

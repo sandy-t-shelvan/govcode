@@ -62,6 +62,9 @@ type Env struct {
 	Summary      string
 	Changed      map[string]bool
 	Events       chan<- Event // optional, for audit/UI
+	// OnEdit is called after every successful edit with the changed path
+	// (repo-relative), before post-edit hooks; used for checkpoints.
+	OnEdit func(rel string)
 }
 
 // Event lets the caller audit tool side effects (commands run, files changed).

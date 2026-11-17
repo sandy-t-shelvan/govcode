@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,10 +14,13 @@ import (
 
 	"github.com/sandy-t-shelvan/govcode/internal/agent"
 	"github.com/sandy-t-shelvan/govcode/internal/analysis"
+	"github.com/sandy-t-shelvan/govcode/internal/audit"
 	"github.com/sandy-t-shelvan/govcode/internal/gitx"
 	"github.com/sandy-t-shelvan/govcode/internal/llm"
 	"github.com/sandy-t-shelvan/govcode/internal/marking"
+	"github.com/sandy-t-shelvan/govcode/internal/permissions"
 	"github.com/sandy-t-shelvan/govcode/internal/proposal"
+	"github.com/sandy-t-shelvan/govcode/internal/runstate"
 	"github.com/sandy-t-shelvan/govcode/internal/secrets"
 	"github.com/sandy-t-shelvan/govcode/internal/tools"
 )
@@ -34,6 +38,9 @@ type RunOptions struct {
 	OnEvent func(kind string, data any)
 	// OnToken streams model text (line by line, spillage-checked).
 	OnToken func(string)
+	// Resume continues an interrupted run of this proposal id. Task, if
+	// set, is then a follow-up message from the proposer.
+	Resume string
 }
 
 // Run executes one task and produces a proposal. It never touches the
@@ -54,20 +61,39 @@ func (a *App) Run(ctx context.Context, o RunOptions) (*proposal.Proposal, error)
 			return nil, err
 		}
 	}
-	base, err := a.Repo.RevParse("refs/heads/" + p.TargetBranch)
-	if err != nil {
-		return nil, fmt.Errorf("target branch %s: %w", p.TargetBranch, err)
+	var st *runstate.State
+	if o.Resume != "" {
+		var err error
+		if st, err = a.Runs.Load(o.Resume, a.Keyring, a.User); err != nil {
+			return nil, err
+		}
+		planMode = planMode || st.PlanMode
 	}
 	id := proposal.NewID()
+	if st != nil {
+		id = st.ID
+	}
+	unlock, err := a.Runs.Lock(id)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { unlock(); a.Runs.DiscardIfEmpty(id) }()
 	sess := a.Session(id)
 	maxLevel := p.MaxLevel()
 	if fs := marking.Above(o.Task, maxLevel); len(fs) > 0 && maxLevel != marking.Unknown {
-		sess.Record("spillage_blocked", map[string]any{"proposal": id, "where": "task", "level": marking.Highest(fs).String(), "repository_level": maxLevel.String()})
+		sess.Record("spillage_blocked", map[string]any{"proposal": id, "where": map[bool]string{true: "follow-up", false: "task"}[st != nil], "level": marking.Highest(fs).String(), "repository_level": maxLevel.String()})
 		return nil, fmt.Errorf("task refused: it contains a %s marking, above this repository's %s accreditation. The event has been audit-logged; report it per your spillage procedure", marking.Highest(fs), maxLevel)
 	}
 	rules, err := p.Rules()
 	if err != nil {
 		return nil, err
+	}
+	if st != nil {
+		return a.runResumed(ctx, o, st, backend, sess, rules, maxLevel, planMode)
+	}
+	base, err := a.Repo.RevParse("refs/heads/" + p.TargetBranch)
+	if err != nil {
+		return nil, fmt.Errorf("target branch %s: %w", p.TargetBranch, err)
 	}
 	branch := proposal.BranchFor(id)
 	wt := filepath.Join(p.StateDir, "worktrees", id)
@@ -100,7 +126,64 @@ func (a *App) Run(ctx context.Context, o RunOptions) (*proposal.Proposal, error)
 	if err := a.Repo.AddWorktree(wt, branch, base); err != nil {
 		return nil, err
 	}
-	defer a.Repo.RemoveWorktree(wt)
+	st = &runstate.State{ID: id, Classification: p.Classification, Proposer: a.User, Task: o.Task, TaskSHA256: hex.EncodeToString(th[:]),
+		Base: base, Branch: branch, Worktree: wt, PlanMode: planMode, AuditTaskSeq: taskEntry.Seq, AuditTaskHash: taskEntry.Hash,
+		ModelID: modelID, Status: runstate.StatusRunning, CheckpointMsgs: map[int]int{}}
+	return a.execute(ctx, o, st, backend, sess, rules, maxLevel, planMode, nil)
+}
+
+// runResumed reopens an interrupted run's worktree and conversation.
+func (a *App) runResumed(ctx context.Context, o RunOptions, st *runstate.State, backend llm.Backend, sess *audit.Session,
+	rules *permissions.Rules, maxLevel marking.Level, planMode bool) (*proposal.Proposal, error) {
+	if out, err := gitx.Git(st.Worktree, "symbolic-ref", "--short", "HEAD"); err != nil || strings.TrimSpace(out) != st.Branch {
+		return nil, fmt.Errorf("worktree %s for %s is missing or not on %s; the run cannot be resumed", st.Worktree, st.ID, st.Branch)
+	}
+	history := append([]llm.Message(nil), st.Messages...)
+	if len(history) < 2 {
+		return nil, fmt.Errorf("run %s has no saved conversation", st.ID)
+	}
+	fields := map[string]any{"proposal": st.ID, "status": st.Status, "turns": len(history), "files": strings.Join(st.Changed, ","),
+		"model": backend.ModelName(), "num_ctx": backend.Options().NumCtx}
+	if f := strings.TrimSpace(o.Task); f != "" {
+		h := sha256.Sum256([]byte(f))
+		fields["follow_up_sha256"] = hex.EncodeToString(h[:])
+		fields["follow_up"] = f
+		history = append(history, llm.Message{Role: llm.RoleUser, Content: "Follow-up from " + a.User.Username + ": " + f})
+	} else {
+		history = append(history, llm.Message{Role: llm.RoleUser, Content: "The run was interrupted and has been resumed. The worktree is as you left it. Continue the task."})
+	}
+	if _, err := sess.RecordEntry("resume", fields); err != nil {
+		return nil, err
+	}
+	st.Status, st.Error = runstate.StatusRunning, ""
+	return a.execute(ctx, o, st, backend, sess, rules, maxLevel, planMode, history)
+}
+
+// execute runs the agent for a new or resumed run, keeps the run resumable
+// if it is interrupted or fails, and otherwise turns it into a proposal.
+func (a *App) execute(ctx context.Context, o RunOptions, st *runstate.State, backend llm.Backend, sess *audit.Session,
+	rules *permissions.Rules, maxLevel marking.Level, planMode bool, history []llm.Message) (*proposal.Proposal, error) {
+	p := a.Policy
+	id, wt, base, branch := st.ID, st.Worktree, st.Base, st.Branch
+	modelID := st.ModelID
+	digest := ""
+	if a.Model != nil {
+		digest = a.Model.Serve.OllamaDigest
+	}
+	th := sha256.Sum256([]byte(st.Task))
+	taskEntry := struct {
+		Seq  uint64
+		Hash string
+	}{st.AuditTaskSeq, st.AuditTaskHash}
+	o.Task = st.Task
+	keep := false
+	defer func() {
+		if !keep {
+			a.Repo.RemoveWorktree(wt)
+			gitx.DeleteCheckpoints(a.Repo.Root, id, base)
+			a.Runs.Delete(id)
+		}
+	}()
 
 	runner, err := tools.NewRunner(p.Sandbox.Mode, wt, p.Sandbox.ExtraROPaths, p.Sandbox.Env)
 	if err != nil {
@@ -130,11 +213,45 @@ func (a *App) Run(ctx context.Context, o RunOptions) (*proposal.Proposal, error)
 	case o.Interactive && p.Commands.PromptForOthers:
 		env.Approver = &TTYApprover{User: a.User, Rec: sess}
 	}
-	memory := a.loadMemory(wt, env, sess)
+	var memory string
+	if history == nil {
+		memory = a.loadMemory(wt, env, sess)
+	} else {
+		restoreEnv(st, env)
+	}
+	// Checkpoint after every edit; persist the run after every turn so an
+	// interrupt, crash or model failure can be resumed.
+	var pending []int
+	var ckptErr error
+	env.OnEdit = func(rel string) {
+		n := env.EditGen
+		c, err := gitx.Checkpoint(wt, id, n, base, changedPaths(env))
+		if err != nil {
+			ckptErr = err
+			sess.Record("checkpoint_failed", map[string]any{"proposal": id, "n": n, "error": err.Error()})
+			return
+		}
+		pending = append(pending, n)
+		sess.Record("checkpoint", map[string]any{"proposal": id, "n": n, "commit": c, "file": rel})
+	}
+	saveState := func(msgs []llm.Message) {
+		if msgs != nil {
+			st.Messages = msgs
+		}
+		for _, n := range pending {
+			st.CheckpointMsgs[n] = len(st.Messages)
+		}
+		pending = nil
+		captureEnv(st, env)
+		if err := a.Runs.Save(st, a.Signer); err != nil {
+			fmt.Fprintf(a.Out, "warning: run state not saved (%v); this run cannot be resumed\n", err)
+		}
+	}
 	fmt.Fprintf(a.Out, "govcode %s | %s | proposal %s\nmodel %s, num_ctx=%d, sandbox=%v\n",
 		p.Classification, a.User, id, modelID, backend.Options().NumCtx, runner.Sandboxed())
 	ag := &agent.Agent{Backend: backend, Tools: tools.NewSet(env), Rec: sess,
-		Cfg: agent.Config{MaxTurns: p.MaxTurns, Out: a.Out, Verbose: o.Verbose, PlanMode: planMode, OnToken: o.OnToken}}
+		Cfg: agent.Config{MaxTurns: p.MaxTurns, Out: a.Out, Verbose: o.Verbose, PlanMode: planMode, OnToken: o.OnToken,
+			History: history, OnTurn: func(msgs []llm.Message) { saveState(msgs) }}}
 	var plan *planHasher
 	if planMode {
 		inner := o.PlanReviewer
@@ -146,6 +263,27 @@ func (a *App) Run(ctx context.Context, o RunOptions) (*proposal.Proposal, error)
 	}
 	start := time.Now()
 	res, runErr := ag.Run(ctx, o.Task, agent.RepoContext{Summary: gitx.Summary(wt), TestCommand: p.Tests.Command, Memory: memory})
+	if plan != nil && plan.sha != "" {
+		st.PlanSHA256 = plan.sha
+	}
+	if runErr == nil && ckptErr != nil {
+		runErr = fmt.Errorf("checkpoint failed: %w", ckptErr)
+	}
+	if res != nil && runErr != nil && !res.Metrics.Finished {
+		// Interrupted or failed: keep the worktree and conversation.
+		close(events)
+		<-done
+		st.Status, st.Error = runstate.StatusError, runErr.Error()
+		if errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded) {
+			st.Status = runstate.StatusInterrupted
+		}
+		saveState(nil)
+		keep = true
+		sess.Record("run_suspended", map[string]any{"proposal": id, "status": st.Status, "reason": errString(runErr),
+			"files": strings.Join(st.Changed, ","), "turns": len(st.Messages)})
+		fmt.Fprintf(a.Out, "\nRun %s %s; worktree and conversation kept.\n  Resume: govcode run --resume %s [\"follow-up\"]\n  Checkpoints: govcode rewind %s\n", id, st.Status, id, id)
+		return nil, fmt.Errorf("%w (run %s kept; resume with: govcode run --resume %s)", runErr, id, id)
+	}
 	var hookReport string
 	if res != nil && len(res.Changed) > 0 && len(p.Hooks.PreProposal) > 0 {
 		hookReport = env.RunHooks(ctx, "pre_proposal", p.Hooks.PreProposal, res.Changed)
@@ -251,9 +389,7 @@ func (a *App) Run(ctx context.Context, o RunOptions) (*proposal.Proposal, error)
 		Tests: proposal.Tests{Command: p.Tests.Command, Runs: env.TestRuns, Passed: env.LastTestPass},
 		Model: modelID, ModelDigest: digest, Status: status, Blocked: blocked, AuditSession: id, AuditTaskSeq: taskEntry.Seq, AuditTaskHash: taskEntry.Hash, Metrics: res.Metrics,
 		ModelInfo: a.modelInfo(backend), Checks: checks}
-	if plan != nil {
-		prop.PlanSHA256 = plan.sha
-	}
+	prop.PlanSHA256 = st.PlanSHA256
 	if err := a.Store.Save(prop, diff, a.Signer); err != nil {
 		return nil, err
 	}
@@ -413,4 +549,73 @@ func analysisChecks(r *analysis.Report, required bool) []proposal.Check {
 	cs = append(cs, proposal.Check{Name: "analysis coverage", Result: cov,
 		Detail: fmt.Sprintf("%d uncovered, %d exempt by unanalyzed_ok", len(r.Uncovered), len(r.Exempt))})
 	return cs
+}
+
+func changedPaths(env *tools.Env) []string {
+	var out []string
+	for p := range env.Changed {
+		out = append(out, p)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// Checkpoint is one restorable point of an interrupted run.
+type Checkpoint = gitx.CheckpointInfo
+
+// Checkpoints lists the checkpoints of a resumable run.
+func (a *App) Checkpoints(id string) (*runstate.State, []Checkpoint, error) {
+	st, err := a.Runs.Load(id, a.Keyring, a.User)
+	if err != nil {
+		return nil, nil, err
+	}
+	cs, err := gitx.Checkpoints(st.Worktree, id, st.Base)
+	return st, cs, err
+}
+
+// Rewind restores an interrupted run's worktree to checkpoint n (0 = the
+// base), trims the conversation back to that point, and records why in
+// the audit session. The run is then resumed with `run --resume`.
+func (a *App) Rewind(id string, n int) ([]string, error) {
+	unlock, err := a.Runs.Lock(id)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+	st, err := a.Runs.Load(id, a.Keyring, a.User)
+	if err != nil {
+		return nil, err
+	}
+	keep := 2 // system and task messages
+	if n > 0 {
+		k, ok := st.CheckpointMsgs[n]
+		if !ok {
+			return nil, fmt.Errorf("run %s has no checkpoint %d", id, n)
+		}
+		keep = k
+	}
+	if n < 0 || keep > len(st.Messages) {
+		return nil, fmt.Errorf("checkpoint %d is not in the saved conversation", n)
+	}
+	files, err := gitx.Rewind(st.Worktree, id, st.Base, n, st.Changed)
+	if err != nil {
+		return nil, err
+	}
+	st.Messages = append(st.Messages[:keep:keep], llm.Message{Role: llm.RoleUser,
+		Content: fmt.Sprintf("%s rewound the worktree to checkpoint %d. Edits made after it are gone. Files changed from the base now: %s. Re-read files before editing, and run the tests again before finishing.",
+			a.User.Username, n, strings.Join(append([]string{}, files...), ", "))})
+	for k := range st.CheckpointMsgs {
+		if k > n {
+			delete(st.CheckpointMsgs, k)
+		}
+	}
+	st.Changed, st.EditGen = files, n
+	st.TestedGen, st.LastTestPass = -1, false
+	if _, err := a.Session(id).RecordEntry("rewind", map[string]any{"proposal": id, "n": n, "files": strings.Join(files, ","), "turns": len(st.Messages)}); err != nil {
+		return nil, err
+	}
+	if err := a.Runs.Save(st, a.Signer); err != nil {
+		return nil, err
+	}
+	return files, nil
 }

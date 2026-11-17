@@ -63,6 +63,14 @@
 - After the agent finishes and before the proposal is saved, each analyzer runs in the command sandbox over the files it covers. File names are passed shell-quoted and in `$GOVCODE_FILES`. A non-zero exit, a timeout, or an output line matching `fail_on` blocks the proposal. `finding` counts all findings.
 - Every run is audit-logged with tool, version, hash, files, finding and blocking counts, and the spillage-checked output. The same facts, without the output, go into the evidence record (3a).
 
+### 2g. Resume and checkpoints
+- If a run is interrupted (Ctrl-C, SIGTERM) or fails (model error, context overflow), govcode keeps the worktree and the conversation instead of deleting them. `govcode runs` lists such runs.
+- `govcode run --resume <id> ["follow-up"]` continues the same proposal, branch and audit session. A follow-up message gets the same spillage check as a task.
+- After every successful edit, the agent-edited files are saved as a checkpoint commit under `refs/govcode/checkpoints/<id>/<n>`. The commit is built with a private index, so the proposal branch and the worktree's index are not touched. `govcode rewind <id>` lists the checkpoints. `govcode rewind <id> <n>` restores the worktree to checkpoint n (0 is the base), drops later checkpoints, trims the conversation back to that point, tells the model what happened, and requires the tests to be run again before finish.
+- The run state (`<state_dir>/runs/<id>/state.json`) is written after every turn and **signed by the proposer**. Only the proposer can resume or rewind it, identified by kernel uid and verified against their uid-bound keyring key. So another user with write access to the shared state directory cannot inject text into the conversation, and an altered file is refused. A lock stops a resume or rewind while the run is still in progress.
+- `resume`, `rewind`, `checkpoint` and `run_suspended` are audit-logged in the proposal's session. When the proposal is finally saved, the worktree, run state and checkpoint refs are removed.
+- The saved conversation contains code and model output. It is classified at the repository's level, like the audit log.
+
 ### 2e. SIEM export and streaming
 - **SIEM** (`siem.syslog: true`): security events go to the local syslog socket `/dev/log` (a Unix datagram socket, not the network) as RFC 5424 records with structured data under `govcode@32473`:
 

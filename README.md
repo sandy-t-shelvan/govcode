@@ -86,6 +86,7 @@ For a classified deployment (strict mode, two-person rule, root-owned policy and
 | Command | Who | What |
 |---|---|---|
 | `govcode run "<task>"` | developer | Runs the agent and produces a signed proposal. Never touches the target branch. |
+| `govcode run --resume <id>` / `runs` / `rewind <id> [n]` | developer | Continues an interrupted run, lists resumable runs, restores the worktree to a checkpoint. |
 | `govcode proposals` / `review <id>` | anyone | Lists proposals; shows a summary, test result, integrity check, audit trail and diff. |
 | `govcode approve <id> [-m]` / `reject <id> -m` | approver | Lands or rejects a proposal. |
 | `govcode audit verify \| show \| object` | anyone | Verifies or inspects the log. |
