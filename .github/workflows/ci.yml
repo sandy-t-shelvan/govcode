@@ -126,3 +126,5 @@ jobs:
           RPMBUILD_FLAGS=--nodeps scripts/build-rpm.sh dist/govcode-ci dist/rpm
           rpm -qlp dist/rpm/govcode-ci-1.x86_64.rpm | grep -qx /usr/bin/govcode
           rpm -qlp dist/rpm/govcode-selinux-ci-1.noarch.rpm | grep -qx /usr/share/selinux/packages/govcode.pp
+          rpm -qlp dist/rpm/govcode-vscode-ci-1.noarch.rpm | grep -qx /usr/share/govcode/vscode/govcode-ci.vsix
+          rpm -qp --scripts dist/rpm/govcode-ci-1.x86_64.rpm | grep -q 'chattr +a /var/lib/govcode/audit/log.jsonl'

@@ -33,6 +33,15 @@ optional). Network access is limited to loopback. This package installs the
 signed release binary unmodified, with its manifest, SLSA provenance,
 SBOM and AI-BOM.
 
+%package vscode
+Summary:        Offline VS Code extension for govcode
+BuildArch:      noarch
+Requires:       %{name} = %{version}-%{release}
+
+%description vscode
+The govcode VS Code extension as an offline VSIX (no marketplace access).
+Install it per user with: code --install-extension %{_datadir}/govcode/vscode/govcode-*.vsix
+
 %package selinux
 Summary:        SELinux policy module for govcode state and configuration
 BuildArch:      noarch
@@ -68,6 +77,13 @@ install -d -m 0755 %{buildroot}%{_sysconfdir}/govcode/trust
 install -d -m 0755 %{buildroot}%{_sysconfdir}/govcode/keys
 install -d -m 2770 %{buildroot}/var/lib/govcode
 install -D -m 0644 selinux/govcode.pp %{buildroot}%{_datadir}/selinux/packages/govcode.pp
+# Root-owned site checks referenced from the policy (hooks.*, analysis).
+install -d -m 0755 %{buildroot}%{_libexecdir}/govcode/hooks
+install -m 0755 deploy/hooks/*.sh %{buildroot}%{_libexecdir}/govcode/hooks/
+# Model server unit, installed but not enabled.
+install -D -m 0644 deploy/ollama/govcode-ollama.service %{buildroot}/usr/lib/systemd/system/govcode-ollama.service
+# Policy skeleton: the site copies it to policy.json and fills it in.
+install -m 0644 deploy/policy.example.json %{buildroot}%{_sysconfdir}/govcode/policy.json.example
 
 %pre
 getent group govcode >/dev/null || groupadd -r govcode
@@ -76,6 +92,14 @@ exit 0
 %post
 # The binary verifies itself against the manifest at /usr/share/govcode;
 # point trust.release_manifest and trust.release_provenance there.
+# Create the default audit log append-only (chattr +a). govcode only ever
+# opens it with O_APPEND; set audit.require_append_only to enforce this.
+if [ ! -e /var/lib/govcode/audit/log.jsonl ]; then
+  install -d -m 2770 -o root -g govcode /var/lib/govcode/audit
+  install -m 0660 -o root -g govcode /dev/null /var/lib/govcode/audit/log.jsonl
+  chattr +a /var/lib/govcode/audit/log.jsonl 2>/dev/null || \
+    echo "govcode: could not set chattr +a on /var/lib/govcode/audit/log.jsonl (filesystem without append-only support?)" >&2
+fi
 exit 0
 
 %post selinux
@@ -101,10 +125,17 @@ exit 0
 %doc README.md
 %{_bindir}/govcode
 %{_datadir}/govcode/
+%exclude %{_datadir}/govcode/vscode
+%{_libexecdir}/govcode/
+/usr/lib/systemd/system/govcode-ollama.service
+%config(noreplace) %attr(0644,root,root) %{_sysconfdir}/govcode/policy.json.example
 %dir %attr(0755,root,root) %{_sysconfdir}/govcode
 %dir %attr(0755,root,root) %{_sysconfdir}/govcode/trust
 %dir %attr(0755,root,root) %{_sysconfdir}/govcode/keys
 %dir %attr(2770,root,govcode) /var/lib/govcode
+
+%files vscode
+%{_datadir}/govcode/vscode/
 
 %files selinux
 %{_datadir}/selinux/packages/govcode.pp

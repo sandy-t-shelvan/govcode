@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
 # build-rpm.sh — package a signed release directory as RHEL 8/9 RPMs.
 #
-#   scripts/build-rpm.sh dist/govcode-<version> [out_dir]
+#   scripts/build-rpm.sh dist/govcode-<version> [out_dir] [release-signing.key]
+#
+# With a key, it also writes SHA256SUMS over the RPMs and signs it with the
+# release key (verify: govcode sign checks with release.pub). Sign the RPMs
+# themselves with your site's RPM key (rpmsign --addsign) as well.
 #
 # Run it on a RHEL (or Rocky/Alma) build host of the same major version you
 # deploy to, with rpm-build and selinux-policy-devel installed. The binary is
 # not rebuilt: the RPM carries the exact file listed in the signed manifest,
 # and this script checks that after building.
 set -euo pipefail
-REL=${1:?release directory (dist/govcode-<version>)}; OUT=${2:-dist/rpm}
+REL=${1:?release directory (dist/govcode-<version>)}; OUT=${2:-dist/rpm}; KEY=${3:-}
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 REL=$(cd "$REL" && pwd); NAME=$(basename "$REL"); VERSION=${NAME#govcode-}
 RPMVER=${VERSION//-/\~}   # RPM versions cannot contain '-'
@@ -32,4 +36,7 @@ x=$(mktemp -d); main=$(find "$OUT" -maxdepth 1 -name "govcode-$RPMVER-*.x86_64.r
 got=$(sha256sum "$x/usr/bin/govcode" | cut -d' ' -f1); rm -rf "$x"
 [ "$got" = "$want" ] || { echo "packaged binary $got differs from signed manifest $want" >&2; exit 1; }
 echo "rpm binary matches signed manifest: $got"
-ls -1 "$OUT"/*.rpm
+if [ -n "$KEY" ]; then
+  ( cd "$OUT" && sha256sum ./*.rpm > SHA256SUMS && "$REL/bin/govcode" sign -key "$KEY" SHA256SUMS )
+fi
+ls -1 "$OUT"

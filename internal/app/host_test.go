@@ -1,7 +1,9 @@
 package app
 
 import (
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -60,5 +62,35 @@ func TestHostChecksAdvisoryWhenNotRequired(t *testing.T) {
 	_, checks, err := openWorld(t, nil) // dev policy: warn mode, nothing required
 	if err != nil || !hasCheck(checks, "host FIPS", "SKIP") || !hasCheck(checks, "SELinux", "SKIP") {
 		t.Fatalf("%v %+v", err, checks)
+	}
+}
+
+// Mirrors the RPM %post: an empty, pre-created, chattr +a audit log must be
+// accepted with audit.require_append_only, and runs must append to it.
+func TestPrecreatedAppendOnlyAuditLog(t *testing.T) {
+	var logPath string
+	a, checks, err := openWorld(t, func(p *policy.Policy) {
+		p.Audit.RequireAppendOnly = true
+		dir := filepath.Join(p.StateDir, "audit")
+		os.MkdirAll(dir, 0o2770)
+		logPath = filepath.Join(dir, "log.jsonl")
+		os.WriteFile(logPath, nil, 0o660)
+		if out, err := exec.Command("chattr", "+a", logPath).CombinedOutput(); err != nil {
+			t.Skipf("chattr +a unavailable here: %v %s", err, out)
+		}
+		t.Cleanup(func() { exec.Command("chattr", "-a", logPath).Run() })
+	})
+	if err != nil || !hasCheck(checks, "audit log", "PASS") {
+		t.Fatalf("%v %+v", err, checks)
+	}
+	if _, err := a.Run(context.Background(), RunOptions{Task: "set port to 2", Backend: edit("int port = 2;")}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(logPath, []byte("x"), 0o660); err == nil {
+		t.Fatal("append-only log was overwritten")
+	}
+	rep, err := a.Log.Verify(a.Keyring, nil, true)
+	if err != nil || rep == nil {
+		t.Fatalf("verify: %v %+v", err, rep)
 	}
 }
