@@ -19,6 +19,7 @@ import (
 	"github.com/sandy-t-shelvan/govcode/internal/policy"
 	"github.com/sandy-t-shelvan/govcode/internal/proposal"
 	"github.com/sandy-t-shelvan/govcode/internal/sign"
+	"github.com/sandy-t-shelvan/govcode/internal/supply"
 )
 
 // world builds a repo, a SECRET-level dev policy, a registered key, and
@@ -292,4 +293,43 @@ func hasCheck(cs []Check, name, status string) bool {
 		}
 	}
 	return false
+}
+
+func TestBuildProvenancePreflight(t *testing.T) {
+	self, err := supply.SelfSHA256()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	mk := func(name string, subjectSHA string) (bundle, pub string) {
+		base := filepath.Join(dir, name)
+		if _, err := sign.GenerateKeyFiles(base); err != nil {
+			t.Fatal(err)
+		}
+		s, _ := sign.LoadSigner(base + ".key")
+		st := &supply.Statement{Type: supply.StatementType, PredicateType: supply.SLSAProvenanceType,
+			Predicate: json.RawMessage(`{"buildDefinition":{"externalParameters":{"commit":"c0ffee","source":"git+file:///src"}},"runDetails":{"builder":{"id":"host://b"}}}`),
+			Subject:   []supply.Subject{{Name: "bin/govcode", Digest: map[string]string{"sha256": subjectSHA}}}}
+		line, _ := supply.SignStatement(s, st)
+		bundle = base + ".intoto.jsonl"
+		os.WriteFile(bundle, line, 0o644)
+		return bundle, base + ".pub"
+	}
+	good, goodPub := mk("good", self)
+	other, _ := mk("other", strings.Repeat("0", 64))
+	trust := func(bundle, pub string) func(*policy.Policy) {
+		return func(p *policy.Policy) { p.Trust.ReleaseProvenance, p.Trust.ReleaseKeys = bundle, []string{pub} }
+	}
+	_, checks, err := openWorld(t, trust(good, goodPub))
+	if err != nil || !hasCheck(checks, "build provenance", "PASS") {
+		t.Fatalf("good provenance: %v %+v", err, checks)
+	}
+	if _, _, err := openWorld(t, trust(other, goodPub)); err == nil || !strings.Contains(err.Error(), "build provenance") {
+		t.Fatalf("provenance signed by another key accepted: %v", err)
+	}
+	wrongSubject, _ := mk("wrong", strings.Repeat("0", 64))
+	otherPub := filepath.Join(dir, "wrong.pub")
+	if _, _, err := openWorld(t, trust(wrongSubject, otherPub)); err == nil || !strings.Contains(err.Error(), "not a subject") {
+		t.Fatalf("provenance without this binary accepted: %v", err)
+	}
 }

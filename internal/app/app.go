@@ -110,6 +110,11 @@ func Open(policyPath string, out io.Writer, needSigner bool) (*App, []Check, err
 		add("release signature", "SKIP", "no trust.release_manifest configured (development)")
 	}
 
+	// Supply chain: build provenance (SLSA v1, DSSE-signed by the release key)
+	if p.Trust.ReleaseProvenance != "" {
+		add(checkProvenance(p.Trust.ReleaseProvenance, p.Trust.ReleaseKeys))
+	}
+
 	// Supply chain: model lock
 	if p.Model.Lock != "" {
 		var l *modelpin.Lock
@@ -244,10 +249,33 @@ func (a *App) checkOrigin(m *modelpin.Model, add func(name, status, detail strin
 	add("model origin", "FAIL", err.Error())
 }
 
+// checkProvenance verifies the release provenance signature and that the
+// running binary is one of its subjects.
+func checkProvenance(path string, keyPaths []string) (string, string, string) {
+	const name = "build provenance"
+	keys, err := loadKeys(keyPaths)
+	if err != nil {
+		return name, "FAIL", err.Error()
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return name, "FAIL", err.Error()
+	}
+	self, err := supply.SelfSHA256()
+	if err != nil {
+		return name, "FAIL", err.Error()
+	}
+	r, err := supply.VerifyAttestation(data, supply.SLSAProvenanceType, keys, self)
+	if err != nil {
+		return name, "FAIL", err.Error()
+	}
+	return name, "PASS", fmt.Sprintf("binary is subject %s; built by %s from %s@%.12s (reproducible=%v; signed by %s)", r.Subject.Name, r.Builder, r.Source, r.Commit, r.Repro, r.KeyID)
+}
+
 // Some failures are fatal even in warn mode.
 func isAlwaysFatal(name string) bool {
 	switch name {
-	case "signing key", "audit log", "sandbox", "num_ctx", "served model digest", "model origin":
+	case "signing key", "audit log", "sandbox", "num_ctx", "served model digest", "model origin", "build provenance":
 		return true
 	}
 	return false

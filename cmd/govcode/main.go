@@ -61,6 +61,8 @@ Setup and supply chain:
   govcode aibom -lock f [-o f]    CycloneDX 1.6 AI-BOM from a model lock
   govcode sign -key k file...     write detached signatures (release / model signing)
   govcode manifest -dir d -version v [-o f]   release manifest (SHA-256 of every file in d)
+  govcode provenance -dir d -key k -source u -commit c -builder b   signed SLSA v1 provenance + SBOM attestation
+  govcode attest verify -key pub -bundle f (-subject file | -sha256 h) [-type slsa|sbom]   offline check
   govcode model verify -dir d [-model id] [-key pub]
   govcode model smoke             one tool-call round trip against the served model
   govcode eval [-tasks dir] [-o dir] [-only id]   tool-call/task eval on legacy-code tasks
@@ -106,6 +108,10 @@ func main() {
 		err = cmdAIBOM(args)
 	case "sign":
 		err = cmdSign(args)
+	case "provenance":
+		err = cmdProvenance(args)
+	case "attest":
+		err = cmdAttest(args)
 	case "manifest":
 		err = cmdManifest(args)
 	case "model":
@@ -767,4 +773,123 @@ func summaryLine(m map[string]any) string {
 		}
 	}
 	return strings.Join(parts, " ")
+}
+
+// cmdProvenance writes the signed SLSA v1 provenance and the SBOM
+// attestation for a release directory (called by build-release.sh).
+func cmdProvenance(args []string) error {
+	fs := flag.NewFlagSet("provenance", flag.ExitOnError)
+	dir := fs.String("dir", "", "release directory")
+	key := fs.String("key", "", "release signing key")
+	bi := supply.BuildInfo{}
+	fs.StringVar(&bi.Version, "version", supply.Version, "release version")
+	fs.StringVar(&bi.SourceRepo, "source", "", "source repository URI (git+https://...)")
+	fs.StringVar(&bi.Commit, "commit", "", "full source commit")
+	fs.BoolVar(&bi.TreeClean, "clean", false, "the work tree had no uncommitted changes")
+	fs.StringVar(&bi.GoVersion, "go-version", "", "`go version` output")
+	fs.StringVar(&bi.GoToolSHA256, "go-sha256", "", "SHA-256 of the go tool")
+	fs.BoolVar(&bi.Reproducible, "reproducible", false, "two builds produced the same binary")
+	fs.StringVar(&bi.ReproSHA256, "repro-sha256", "", "binary hash both builds produced")
+	fs.StringVar(&bi.BuilderID, "builder", "", "builder identity (URI of the build host or pipeline)")
+	started := fs.Int64("started", 0, "build start, Unix seconds")
+	var env multi
+	fs.Var(&env, "env", "build environment KEY=VALUE (repeatable)")
+	fs.Parse(args)
+	if *dir == "" || *key == "" || bi.BuilderID == "" {
+		return errors.New("usage: govcode provenance -dir <release> -key <release.key> -source <uri> -commit <sha> -builder <id> [...]")
+	}
+	bi.Env = map[string]string{}
+	for _, e := range env {
+		k, v, _ := strings.Cut(e, "=")
+		bi.Env[k] = v
+	}
+	if *started > 0 {
+		bi.StartedOn, bi.FinishedOn = time.Unix(*started, 0), time.Now()
+	}
+	s, err := sign.LoadSigner(*key)
+	if err != nil {
+		return err
+	}
+	st, err := supply.BuildProvenance(*dir, bi)
+	if err != nil {
+		return err
+	}
+	line, err := supply.SignStatement(s, st)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(*dir, supply.ProvenanceFile), line, 0o644); err != nil {
+		return err
+	}
+	fmt.Printf("wrote %s (%d subjects, key %s)\n", supply.ProvenanceFile, len(st.Subject), s.KeyID())
+
+	sbom, err := os.ReadFile(filepath.Join(*dir, "sbom.cdx.json"))
+	if err != nil {
+		return err
+	}
+	var subs []supply.Subject
+	for _, sub := range st.Subject {
+		if strings.HasPrefix(sub.Name, "bin/") || strings.HasSuffix(sub.Name, ".vsix") {
+			subs = append(subs, sub)
+		}
+	}
+	sst, err := supply.SBOMStatement(sbom, subs)
+	if err != nil {
+		return err
+	}
+	if line, err = supply.SignStatement(s, sst); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(*dir, supply.SBOMAttestationFile), line, 0o644); err != nil {
+		return err
+	}
+	fmt.Printf("wrote %s (%d subjects)\n", supply.SBOMAttestationFile, len(subs))
+	return nil
+}
+
+// cmdAttest verifies an attestation offline: govcode attest verify
+// -key release.pub -bundle provenance.intoto.jsonl -subject bin/govcode
+func cmdAttest(args []string) error {
+	if len(args) == 0 || args[0] != "verify" {
+		return errors.New("usage: govcode attest verify -key <pub> -bundle <file.intoto.jsonl> (-subject <file> | -sha256 <hex>) [-type slsa|sbom]")
+	}
+	fs := flag.NewFlagSet("attest verify", flag.ExitOnError)
+	var keys multi
+	fs.Var(&keys, "key", "trusted release public key (repeatable)")
+	bundle := fs.String("bundle", "", "attestation bundle")
+	subject := fs.String("subject", "", "file that must be a subject")
+	sum := fs.String("sha256", "", "SHA-256 that must be a subject")
+	typ := fs.String("type", "slsa", "slsa (build provenance) or sbom")
+	fs.Parse(args[1:])
+	if len(keys) == 0 || *bundle == "" || (*subject == "") == (*sum == "") {
+		return errors.New("usage: govcode attest verify -key <pub> -bundle <file> (-subject <file> | -sha256 <hex>)")
+	}
+	pt := supply.SLSAProvenanceType
+	if *typ == "sbom" {
+		pt = supply.CycloneDXPredicate
+	} else if *typ != "slsa" {
+		return fmt.Errorf("unknown -type %q", *typ)
+	}
+	trusted, err := loadPubs(keys)
+	if err != nil {
+		return err
+	}
+	if *subject != "" {
+		if *sum, _, err = modelpin.HashFile(*subject); err != nil {
+			return err
+		}
+	}
+	data, err := os.ReadFile(*bundle)
+	if err != nil {
+		return err
+	}
+	r, err := supply.VerifyAttestation(data, pt, trusted, *sum)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("PASS  %s is subject %q, signed by %s\n", (*sum)[:16], r.Subject.Name, r.KeyID)
+	if pt == supply.SLSAProvenanceType {
+		fmt.Printf("      built by %s from %s@%s (reproducible=%v)\n", r.Builder, r.Source, r.Commit, r.Repro)
+	}
+	return nil
 }
