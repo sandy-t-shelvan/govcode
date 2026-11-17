@@ -147,6 +147,22 @@ install -m 660 -g govcode-radar /dev/null /var/lib/govcode/radar-fw/audit/log.js
 
 `chattr +a` means that even the file's owner can only append; only root can remove the flag. With `audit.require_append_only: true`, govcode refuses to run if the flag is missing. Back the log up to WORM media on your normal schedule. Its objects directory (`audit/objects/`) holds the full content and must be backed up too.
 
+### Large repositories
+
+Measured on the Linux 6.6.60 source (81,798 files, 1.5 GB tree, 546 MB `.git`) on 4 vCPU, with a replayed model so that only govcode's own cost is timed (`scripts/scale/run.sh`, GOV-42):
+
+| Step | Time |
+|---|---|
+| Run setup: isolated worktree checkout of the whole tree | 7 s idle, up to 32 s with the model server busy on the same CPUs; once per run (disk-bound git checkout) |
+| `list_files` (all, or `**/*.c`) | 0.5–0.7 s |
+| `search` broad (`static`, 790,344 matches, 150 shown) | 1.6 s |
+| `search` narrow (with a glob or path) | 0.1–0.5 s |
+| `outline` / `read_file` on a 12,000-line C file | < 0.05 s |
+| `edit_file`, including the rewind checkpoint | 0.4 s |
+| Proposal (diff, signing, audit) | 0.4 s |
+
+Peak memory was about 400 MB, mostly the git processes. Every run checks out its own worktree, so allow free disk of about one working-tree size per concurrent run, and put the state directory on the same filesystem as the repository.
+
 ## 5. Keys
 
 Each user generates their own key, and the private half never leaves their home directory:
