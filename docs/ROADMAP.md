@@ -15,7 +15,7 @@ Mirrors Jira project **GOV**: one epic per phase, one story per feature. Each st
 | GOV-12 Agent features | GOV-18 permission rules | Done (PR #3) |
 | | GOV-19 plan mode, GOV-20 hooks, GOV-21 project memory | Done (PR #4) |
 | | GOV-23 streaming | Done (PR #6) |
-| | GOV-22 resume and checkpoints | Built (PR pending) |
+| | GOV-22 resume, checkpoints and rewind (also GOV-23 follow-ups) | Done (PR #14) |
 | GOV-13 VS Code | GOV-24 serve --stdio, GOV-25 panel, GOV-26 review, GOV-27 VSIX | Done (PR #5); **not yet tried in a real VS Code** |
 | GOV-14 Classified hardening | GOV-28 spillage guard, GOV-29 secret scan | Done (PR #3) |
 | | GOV-30 SIEM export | Done (PR #6) |
