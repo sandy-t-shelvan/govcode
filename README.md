@@ -95,6 +95,7 @@ For a classified deployment (strict mode, two-person rule, root-owned policy and
 | `govcode sbom`, `aibom`, `manifest`, `sign` | release engineer | Supply-chain artifacts. |
 | `govcode model verify \| smoke` | admin | Checks staged weights against the lock; tests one tool call against the server. |
 | `govcode eval` | evaluator | Measures tool calls and task success on the 10 legacy tasks. |
+| `govcode ato -o <dir> [-stig xccdf] [-govulncheck f] [-test-json f]` | ISSM | ATO evidence package: 800-53 statements, DoWI 8430.01 mapping, STIG checklist, VEX, test and audit summaries. A self-assessment, not an authorization. |
 | `govcode serve --stdio` | VS Code extension | JSON-RPC over stdin/stdout for the editor UI; no sockets. |
 
 ## Documentation
@@ -104,6 +105,7 @@ For a classified deployment (strict mode, two-person rule, root-owned policy and
 - [docs/SUPPLY_CHAIN.md](docs/SUPPLY_CHAIN.md): what the security reviewer checks, model staging, SBOM and AI-BOM, FIPS
 - [docs/EVAL.md](docs/EVAL.md): measuring tool-call reliability on your hardware
 - [docs/VSCODE.md](docs/VSCODE.md): the VS Code extension (offline VSIX)
+- [docs/ATO.md](docs/ATO.md): generating the ATO evidence package for the ISSM
 - [docs/ROADMAP.md](docs/ROADMAP.md): phase and ticket plan (mirrors Jira)
 - [CONTRIBUTING.md](CONTRIBUTING.md): branch, PR, CI gates and merge rules
 
