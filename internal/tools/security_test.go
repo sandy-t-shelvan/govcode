@@ -2,6 +2,7 @@ package tools
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -127,5 +128,39 @@ func TestPermissionDecisionsAudited(t *testing.T) {
 	}
 	if len(got) != 2 || !strings.HasPrefix(got[0], "allow:run_command(make *)") || !strings.HasPrefix(got[1], "deny:default") {
 		t.Fatalf("permission events %v", got)
+	}
+}
+
+// A broad search on a large repository is capped: the shown lines stop at
+// maxSearchResults, the rest are counted, and matches in denied paths are
+// neither shown nor counted (the count must not reveal what is hidden).
+func TestSearchCapsAndCountsWithoutLeaking(t *testing.T) {
+	var big, hid strings.Builder
+	for i := 0; i < maxSearchResults+250; i++ {
+		fmt.Fprintf(&big, "int match_%d;\n", i)
+	}
+	for i := 0; i < 100; i++ {
+		fmt.Fprintf(&hid, "int match_secret_%d;\n", i)
+	}
+	long := "int match_long = 1; /* " + strings.Repeat("x", 2*maxLineWidth) + " */\n"
+	e := repo(t, map[string]string{"a_long.c": long, "big.c": big.String(), "keys/hidden.c": hid.String()})
+	e.Perms, _ = permissions.Parse(nil, nil, []string{"read_file(keys/**)"})
+	out, err := call(t, NewSet(e), "search", map[string]any{"pattern": "match_"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) != maxSearchResults+1 {
+		t.Fatalf("got %d lines, want %d results + 1 summary", len(lines), maxSearchResults)
+	}
+	// a_long.c (1) + big.c (cap+250) matches in total, cap shown: 251 more.
+	if want := "[... 251 more matches"; !strings.HasPrefix(lines[len(lines)-1], want) {
+		t.Fatalf("summary %q, want prefix %q", lines[len(lines)-1], want)
+	}
+	if strings.Contains(out, "hidden.c") || strings.Contains(out, "secret") {
+		t.Fatal("denied path leaked")
+	}
+	if !strings.HasPrefix(lines[0], "a_long.c:1:") || !strings.HasSuffix(lines[0], " [...]") || len(lines[0]) > maxLineWidth+len(" [...]") {
+		t.Fatalf("long line not truncated: %d chars", len(lines[0]))
 	}
 }
