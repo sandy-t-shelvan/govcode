@@ -86,6 +86,28 @@ func (t *listFiles) Run(ctx context.Context, a map[string]any) (string, error) {
 // no '/' matches the base name at any depth (so '*.c' finds src/a.c).
 func globMatch(pattern, name string) bool { return permissions.PathMatch(pattern, name) }
 
+// grepHit splits one `git grep -n` line (`path:lineno:text`) into the path
+// and the matched text. The line number is the first all-digit field.
+func grepHit(line string) (file, content string) {
+	file, rest, ok := strings.Cut(line, ":")
+	if !ok {
+		return line, line
+	}
+	if i := strings.IndexByte(rest, ':'); i > 0 && allDigits(rest[:i]) {
+		return file, rest[i+1:]
+	}
+	return file, rest
+}
+
+func allDigits(s string) bool {
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 // ---- search ----
 
 type search struct{ e *Env }
@@ -142,11 +164,14 @@ func (t *search) Run(ctx context.Context, a map[string]any) (string, error) {
 	var lines []string
 	hidden := 0
 	for _, l := range all {
-		file, rest, _ := strings.Cut(l, ":")
+		file, content := grepHit(l)
 		if d, _ := t.e.rules().Decide("read_file", file); d == permissions.Deny {
 			continue
 		}
-		if t.e.spill("search result in "+file, rest) {
+		// Portion marks and banner lines match only at the start of the
+		// file's own line. git grep -n prefixes "path:lineno:", which
+		// would hide those markings and send them to the model.
+		if t.e.spill("search result in "+file, content) {
 			hidden++
 			continue
 		}

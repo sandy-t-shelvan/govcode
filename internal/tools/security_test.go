@@ -112,6 +112,28 @@ func TestSpillageWithheldFromModel(t *testing.T) {
 	}
 }
 
+// git grep -n prefixes every hit with "path:lineno:". Portion marks and
+// banner lines are recognised only at the start of a line, so the guard
+// has to see the file text, not the lineno prefix. Otherwise a search
+// hands the model markings that read_file would withhold.
+func TestSearchSpillageIgnoresLineNumberPrefix(t *testing.T) {
+	e := repo(t, map[string]string{
+		"banner.txt":  "TOP SECRET\n",
+		"portion.txt": "(TS) payload coordinates\n// (S) allowed in this repo\n",
+	})
+	e.MaxLevel = marking.S
+	out, err := call(t, NewSet(e), "search", map[string]any{"pattern": "SECRET|payload|allowed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "TOP SECRET") || strings.Contains(out, "payload") {
+		t.Fatalf("search leaked markings above the repository level:\n%s", out)
+	}
+	if !strings.Contains(out, "withheld") || !strings.Contains(out, "allowed") {
+		t.Fatalf("search dropped a permitted line or the withhold notice:\n%s", out)
+	}
+}
+
 func TestPermissionDecisionsAudited(t *testing.T) {
 	e := repo(t, map[string]string{"a": "x"})
 	e.Allowlist = []string{"make"}
