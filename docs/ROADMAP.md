@@ -8,7 +8,8 @@ Mirrors Jira project **GOV**: one epic per phase, one story per feature. Each st
 | | GOV-9 model staging | Code done; **staging run pending** (low-side host, about 80 GB) |
 | | GOV-10 10-task eval | Harness done, scoring validated; **target-model run pending on GPU** |
 | | GOV-40 real local model, air-gapped (CPU) | Done: Granite-3.3-8B on CPU in a loopback-only namespace scored 3/10 tasks with 97% valid tool calls; 5 real-model bugs fixed (see EVAL.md). Not a Devstral result |
-| GOV-2 Agent loop on legacy code | (phase 1–5 PR) | Done; large-repo scale test outstanding |
+| GOV-2 Agent loop on legacy code | (phase 1–5 PR) | Done |
+| | GOV-42 large-repository scale test | Done: on Linux 6.6.60 (81,798 files) every tool answers in under 1.6 s and a full run takes about 20 s. A broad search was 5× slower than git grep; it now streams (DEPLOYMENT.md, "Large repositories") |
 | GOV-3 Signed audit log | (phase 1–5 PR) | Done; WORM export covered by GOV-30 |
 | GOV-4 SBOM / supply chain | (phase 1–5 PR) | Done |
 | GOV-5 Approval and access control | (phase 1–5 PR) | Done; hardware signer GOV-31 |

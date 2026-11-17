@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"fmt"
@@ -131,26 +132,56 @@ func (t *search) Run(ctx context.Context, a map[string]any) (string, error) {
 		args = append(args, spec)
 	}
 	args = append(args, ":(exclude).govcode")
-	out, err := exec.CommandContext(ctx, "git", args...).Output()
+	// Stream git grep: a broad pattern on a large repository can match
+	// hundreds of thousands of lines. Only the lines that will be shown get
+	// the spillage scan; the rest are just counted (respecting deny rules,
+	// cached per file), so cost and memory stay bounded.
+	cmd := exec.CommandContext(ctx, "git", args...)
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 1 {
-			return "No matches.", nil
-		}
 		return "", fmt.Errorf("search failed: %v", err)
 	}
-	all := strings.Split(strings.TrimRight(string(out), "\n"), "\n")
+	if err := cmd.Start(); err != nil {
+		return "", fmt.Errorf("search failed: %v", err)
+	}
+	denied := map[string]bool{}
+	isDenied := func(file string) bool {
+		d, ok := denied[file]
+		if !ok {
+			dec, _ := t.e.rules().Decide("read_file", file)
+			d = dec == permissions.Deny
+			denied[file] = d
+		}
+		return d
+	}
 	var lines []string
-	hidden := 0
-	for _, l := range all {
-		file, rest, _ := strings.Cut(l, ":")
-		if d, _ := t.e.rules().Decide("read_file", file); d == permissions.Deny {
-			continue
+	hidden, more := 0, 0
+	rd := bufio.NewReaderSize(stdout, 64<<10)
+	for {
+		l, rerr := rd.ReadString('\n')
+		if l = strings.TrimRight(l, "\n"); l != "" {
+			file, rest, _ := strings.Cut(l, ":")
+			switch {
+			case isDenied(file):
+			case len(lines) >= maxSearchResults:
+				more++
+			case t.e.spill("search result in "+file, rest):
+				hidden++
+			default:
+				if len(l) > maxLineWidth {
+					l = l[:maxLineWidth] + " [...]"
+				}
+				lines = append(lines, l)
+			}
 		}
-		if t.e.spill("search result in "+file, rest) {
-			hidden++
-			continue
+		if rerr != nil {
+			break
 		}
-		lines = append(lines, l)
+	}
+	if err := cmd.Wait(); err != nil {
+		if ee, ok := err.(*exec.ExitError); !ok || ee.ExitCode() != 1 {
+			return "", fmt.Errorf("search failed: %v", err)
+		}
 	}
 	if hidden > 0 {
 		lines = append(lines, fmt.Sprintf("[govcode: %d matching line(s) withheld: classification marking above this repository's level]", hidden))
@@ -159,15 +190,11 @@ func (t *search) Run(ctx context.Context, a map[string]any) (string, error) {
 		return "No matches.", nil
 	}
 	var b strings.Builder
-	for i, l := range lines {
-		if i == maxSearchResults {
-			fmt.Fprintf(&b, "[... %d more matches; refine the pattern or add a glob ...]\n", len(lines)-maxSearchResults)
-			break
-		}
-		if len(l) > maxLineWidth {
-			l = l[:maxLineWidth] + " [...]"
-		}
+	for _, l := range lines {
 		b.WriteString(l + "\n")
+	}
+	if more > 0 {
+		fmt.Fprintf(&b, "[... %d more matches; refine the pattern or add a glob ...]\n", more)
 	}
 	return b.String(), nil
 }
