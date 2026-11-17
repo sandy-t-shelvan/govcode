@@ -39,4 +39,4 @@
 
 ## Not yet verified
 
-The extension's unit tests run against a mocked VS Code API, and its integration test runs against the real `govcode serve --stdio`. It has **not yet been installed and exercised in a real VS Code instance**. Do that as part of site acceptance.
+The extension's unit tests run against a mocked VS Code API, and its integration test runs against the real `govcode serve --stdio`. `scripts/e2e/vscode-real.sh <unpacked-vscode-dir> [govcode]` also runs it inside a **real VS Code** (validated with 1.95.3, headless under xvfb) against the real server and a replayed model. It checks activation, commands, a run to a ready proposal, the proposals tree, the diff view, the panel, audit verify, that approval is not reachable from the extension, and reject. CI runs it on every change. As part of site acceptance, install the VSIX in the site's own VS Code build and repeat the review flow by hand, including a remote/SSH workspace if you use one.

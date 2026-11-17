@@ -19,7 +19,8 @@ Mirrors Jira project **GOV**: one epic per phase, one story per feature. Each st
 | | GOV-19 plan mode, GOV-20 hooks, GOV-21 project memory | Done (PR #4) |
 | | GOV-23 streaming | Done (PR #6) |
 | | GOV-22 resume, checkpoints and rewind (also GOV-23 follow-ups) | Done (PR #14) |
-| GOV-13 VS Code | GOV-24 serve --stdio, GOV-25 panel, GOV-26 review, GOV-27 VSIX | Done (PR #5); **not yet tried in a real VS Code** |
+| GOV-13 VS Code | GOV-24 serve --stdio, GOV-25 panel, GOV-26 review, GOV-27 VSIX | Done (PR #5) |
+| | GOV-43 real VS Code | Done: in VS Code 1.95.3 (headless, pinned SHA-256) the extension activates, drives the real `govcode serve` through a run to a ready proposal, and shows the tree, diff and panel. 10/10 checks, in CI on every PR. Not yet tried on the site's VS Code build or a remote/SSH workspace |
 | GOV-14 Classified hardening | GOV-28 spillage guard, GOV-29 secret scan | Done (PR #3) |
 | | GOV-30 SIEM export | Done (PR #6) |
 | | GOV-31 PIV/CAC signing (PKCS#11, site CA, hardware approvers) | Done (PR #17); tested with SoftHSM2 in CI; **physical CAC not yet tried** |

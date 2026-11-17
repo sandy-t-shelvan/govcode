@@ -91,6 +91,16 @@ jobs:
         run: |
           go build -o "$RUNNER_TEMP/govcode" ./cmd/govcode
           cd vscode && GOVCODE_BIN="$RUNNER_TEMP/govcode" node --test test/*.test.js
+      - name: extension in a real VS Code, headless (GOV-43)
+        env:
+          VSCODE_VERSION: "1.95.3"
+          VSCODE_SHA256: "881c6dce9f9b18bdeaa0020197501be3808c6e23c26baa0ba905b0bc84175b46"
+        run: |
+          sudo apt-get install -y -qq xvfb libasound2t64 libgbm1 libnss3 libgtk-3-0t64 >/dev/null
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/vscode.tar.gz" "https://update.code.visualstudio.com/$VSCODE_VERSION/linux-x64/stable"
+          echo "$VSCODE_SHA256  $RUNNER_TEMP/vscode.tar.gz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/vscode" && tar -xzf "$RUNNER_TEMP/vscode.tar.gz" -C "$RUNNER_TEMP/vscode" --strip-components=1
+          scripts/e2e/vscode-real.sh "$RUNNER_TEMP/vscode" "$RUNNER_TEMP/govcode"
       - name: reproducible VSIX
         run: |
           scripts/package-vsix.sh "$RUNNER_TEMP/a.vsix"
