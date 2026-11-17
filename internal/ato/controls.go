@@ -1,0 +1,142 @@
+// Package ato generates the evidence package an ISSM needs to put govcode
+// into a System Security Plan: NIST SP 800-53 Rev 5 control statements,
+// a DoWI 8430.01 mapping, an ASD STIG checklist pre-filled with evidence
+// pointers, a VEX document, test summaries and an audit sample.
+//
+// Everything it writes is a contractor self-assessment, not an
+// authorization. Statements cite code paths, test names and policy fields;
+// TestEvidenceExists fails the build if any of them stops existing, so the
+// package cannot silently drift from the code.
+package ato
+
+// Control is one NIST SP 800-53 Rev 5 control govcode implements or supports.
+type Control struct {
+	ID     string `json:"id"`
+	Title  string `json:"title"`
+	Status string `json:"implementation_status"` // implemented | partial | supported | inherited
+	// Statement is the implementation statement as written for the SSP.
+	Statement string   `json:"statement"`
+	Code      []string `json:"evidence_code"`
+	Tests     []string `json:"evidence_tests"`
+	Policy    []string `json:"policy_fields"`
+	// Customer is what the site must provide for the control to be met.
+	Customer string `json:"customer_responsibility,omitempty"`
+}
+
+// Controls is the catalog. Titles are the Rev 5 control names.
+var Controls = []Control{
+	{ID: "AC-3", Title: "Access Enforcement", Status: "implemented",
+		Statement: "govcode operates on exactly one repository named in the root-owned policy and refuses any other. Every file tool resolves paths through a jail that rejects absolute paths outside the worktree, '..' escapes, outward symlinks, .git and .govcode. Allow/ask/deny rules (deny beats ask beats allow) are checked inside every tool; denied paths are also removed from listings and search results.",
+		Code:      []string{"internal/tools/jail.go", "internal/permissions/permissions.go", "internal/policy/policy.go"},
+		Tests:     []string{"TestJail", "FuzzJailResolve", "TestDenyRulesHidePaths", "TestPrecedenceAndDefaults", "TestCheckRepo"},
+		Policy:    []string{"repo_root", "permissions.allow", "permissions.ask", "permissions.deny"}},
+	{ID: "AC-5", Title: "Separation of Duties", Status: "implemented",
+		Statement: "The agent can only create proposals on govcode/proposal/<id>; it never writes the target branch. Landing requires an approver listed in policy. With two_person_rule (forced by sensitive: true) the approver's kernel uid must differ from the proposer's, and the approver types 'approve' on /dev/tty, so piped input cannot approve.",
+		Code:      []string{"internal/proposal/proposal.go", "cmd/govcode/main.go"},
+		Tests:     []string{"TestSelfApprovalRefused", "TestNonApproverRefused", "TestOnlyReadyProposalsLand"},
+		Policy:    []string{"two_person_rule", "sensitive", "approvers", "allow_non_interactive_approval"}},
+	{ID: "AC-6", Title: "Least Privilege", Status: "implemented",
+		Statement: "govcode runs as the invoking user with no setuid component. Agent commands run in a bubblewrap sandbox with all namespaces unshared, system directories read-only, the worktree read-write, and no access to $HOME, the policy, the audit log or other repositories. Commands outside the allowlist, or containing shell metacharacters, need a typed human confirmation.",
+		Code:      []string{"internal/tools/exec.go", "internal/tools/run.go", "internal/permissions/permissions.go"},
+		Tests:     []string{"TestSandboxIsolation", "TestAllowlistCannotBeChained", "FuzzDecideNeverAllowsMeta", "TestTimeoutKillsProcessGroup"},
+		Policy:    []string{"sandbox.mode", "commands.allowlist", "commands.prompt_for_others"}},
+	{ID: "AU-2", Title: "Event Logging", Status: "implemented",
+		Statement: "Logged events: every model request and response, tool call and result, command and output, test run, permission decision, plan decision, site check and static-analysis run, spillage and secret finding, proposal, approval, rejection, landing and evidence record.",
+		Code:      []string{"internal/audit/session.go", "internal/agent/agent.go", "internal/app/run.go"},
+		Tests:     []string{"TestPermissionDecisionsAudited", "TestMemoryInPromptAndAudited", "TestOriginExceptionIsWarnedAndAudited"}},
+	{ID: "AU-3", Title: "Content of Audit Records", Status: "implemented",
+		Statement: "Each entry records sequence number, UTC time, the acting user's kernel uid, username and host, session, event kind, a summary, content-addressed objects for full payloads, the classification marking and the signing key id.",
+		Code:      []string{"internal/audit/audit.go"},
+		Tests:     []string{"TestCleanChainVerifies"}},
+	{ID: "AU-6", Title: "Audit Record Review, Analysis, and Reporting", Status: "supported",
+		Statement: "Security events are exported as RFC 5424 records to the local syslog socket for the site SIEM, carrying no code, prompts or model output. `govcode audit show` and `govcode evidence` support review.",
+		Code:      []string{"internal/siem/siem.go", "internal/app/siem.go"},
+		Tests:     []string{"TestFormatRFC5424", "TestSIEMExportCarriesNoContent", "FuzzFormat"},
+		Policy:    []string{"siem.syslog"},
+		Customer:  "Forward syslog to the SIEM and review alerts under the site's audit review procedure."},
+	{ID: "AU-9", Title: "Protection of Audit Information", Status: "implemented",
+		Statement: "The log is hash-chained (SHA-256 over canonical JSON including the previous hash) and Ed25519-signed per entry. Modification, insertion, deletion, reordering and object tampering are detected by `audit verify`; truncation is detected through audit anchors in landed commits. The append-only inode flag is checked and can be required.",
+		Code:      []string{"internal/audit/audit.go", "internal/audit/verify.go"},
+		Tests:     []string{"TestModifiedEntryDetected", "TestDeletedEntryDetected", "TestObjectTamperDetected", "TestTailTruncationNeedsAnchor", "TestAppendOnlyFlag", "TestConcurrentAppend"},
+		Policy:    []string{"audit.require_append_only"},
+		Customer:  "Set chattr +a on the log, back it up to WORM media, and protect it at the classification of the code it records."},
+	{ID: "AU-10", Title: "Non-repudiation", Status: "partial",
+		Statement: "Entries, proposals, decisions and evidence records are signed with the acting user's Ed25519 key; the keyring trusts a key only if its file is owned by that uid or root. Impersonation (actor field not matching the key owner) is detected.",
+		Code:      []string{"internal/sign/sign.go", "internal/keyring/keyring.go", "internal/evidence/evidence.go"},
+		Tests:     []string{"TestImpersonationDetected", "TestKeyringOwnershipBinding", "TestForgedProposalRecordRefused", "TestRecordSignedByOtherKeyIsRefused"},
+		Customer:  "Keys are files protected by permissions; binding signatures to a person needs a PIV/CAC or HSM signer (GOV-31, not yet implemented)."},
+	{ID: "AU-12", Title: "Audit Record Generation", Status: "implemented",
+		Statement: "Records are generated by govcode itself on every run; an audit append failure aborts the run, and the approval entry is written before the merge commit so a landed change always has an entry.",
+		Code:      []string{"internal/audit/session.go", "internal/proposal/proposal.go"},
+		Tests:     []string{"TestApproveLandsWithProvenance", "TestLandWritesVerifiableEvidence"}},
+	{ID: "CM-5", Title: "Access Restrictions for Change", Status: "implemented",
+		Statement: "Changes reach the target branch only through `govcode approve`, which verifies the proposer's signature, the branch head and the diff hash, then moves the ref with a compare-and-swap. Commits use core.hooksPath=/dev/null and --no-verify so model-written hooks never run.",
+		Code:      []string{"internal/proposal/proposal.go", "internal/gitx/gitx.go"},
+		Tests:     []string{"TestTamperedBranchRefused", "TestTargetMovedCleanMergeAndConflict"},
+		Customer:  "Protect the target branch on the git server so only the govcode approval path can push."},
+	{ID: "CM-7", Title: "Least Functionality", Status: "implemented",
+		Statement: "No provider SDKs, no third-party modules, no listening sockets (the editor protocol is stdio). Plan mode restricts the model to read tools until a human approves the plan.",
+		Code:      []string{"internal/supply/nonetwork_test.go", "internal/rpc/rpc.go", "internal/agent/agent.go"},
+		Tests:     []string{"TestGoModHasNoRequires", "TestNoHiddenNetwork", "TestPlanModeGatesEdits"},
+		Policy:    []string{"require_plan_approval"}},
+	{ID: "CM-14", Title: "Signed Components", Status: "implemented",
+		Statement: "In strict mode the binary refuses to run unless its SHA-256 is in a manifest signed by a trusted release key and is a subject of the signed SLSA provenance; the model lock must be signed by a trusted model key.",
+		Code:      []string{"internal/supply/manifest.go", "internal/supply/provenance.go", "internal/modelpin/modelpin.go"},
+		Tests:     []string{"TestBuildProvenancePreflight", "TestProvenanceSignVerify", "TestRoundTripAndTamper"},
+		Policy:    []string{"trust.release_keys", "trust.release_manifest", "trust.release_provenance", "trust.model_keys"}},
+	{ID: "IA-2", Title: "Identification and Authentication (Organizational Users)", Status: "inherited",
+		Statement: "Identity is the kernel's real uid (os.Getuid), never $USER. Authentication is inherited from the host login (CAC/PIV via the site's PAM configuration).",
+		Code:      []string{"internal/identity/identity.go"},
+		Customer:  "Authenticate users to the host with multifactor authentication."},
+	{ID: "IA-5", Title: "Authenticator Management", Status: "partial",
+		Statement: "Signing keys are generated with crypto/rand, written 0600 and refused if group- or world-readable; existing keys are never overwritten.",
+		Code:      []string{"internal/sign/sign.go"},
+		Tests:     []string{"TestLoadSignerRejectsLoosePerms", "TestNoOverwrite"},
+		Customer:  "Issue keys on PIV/CAC or an HSM when GOV-31 lands; until then rotate and revoke keys through the root-owned keyring."},
+	{ID: "SA-11", Title: "Developer Testing and Evaluation", Status: "implemented",
+		Statement: "Every change passes CI gates before merge: gofmt, go vet, staticcheck, govulncheck, the race-enabled test suite with a coverage floor, fuzzing of every parser of untrusted input, the editor extension tests and a reproducible release build. Model tool-calling is measured on ten legacy-code tasks.",
+		Code:      []string{".github/workflows/ci.yml", "scripts/ci/fuzz.sh", "internal/eval/eval.go"},
+		Tests:     []string{"TestOracleScoresAllAndNullScoresNone", "FuzzExtractToolCalls", "FuzzVerifyAttestation", "FuzzSniff"}},
+	{ID: "SA-15", Title: "Development Process, Standards, and Tools", Status: "implemented",
+		Statement: "Each story is built on a feature branch and merged through a pull request with a security-impact checklist once all CI gates pass. AI-generated changes in the deployed system go through mandatory static analysis, tests and human approval.",
+		Code:      []string{"CONTRIBUTING.md", ".github/pull_request_template.md", "internal/analysis/analysis.go"},
+		Tests:     []string{"TestStaticAnalysisGate", "TestUnanalyzedFileBlocksWhenRequired"},
+		Policy:    []string{"analysis.required", "analysis.analyzers"}},
+	{ID: "SC-7", Title: "Boundary Protection", Status: "implemented",
+		Statement: "The only network client resolves the target and refuses anything that is not loopback, ignores proxy variables and refuses redirects off the host. A build-time test fails if any other package imports a network package. Sandboxed commands have no network namespace.",
+		Code:      []string{"internal/netguard/netguard.go", "internal/supply/nonetwork_test.go"},
+		Tests:     []string{"TestClientRefusesNonLoopback", "TestClientIgnoresProxyEnv", "TestRedirectOffHostRefused", "TestRemoteEndpointRejected", "TestNoHiddenNetwork"},
+		Policy:    []string{"model.endpoint"}},
+	{ID: "SC-13", Title: "Cryptographic Protection", Status: "implemented",
+		Statement: "Release builds link the Go Cryptographic Module v1.0.0 in FIPS 140-3 mode (GOFIPS140=v1.0.0). Only Ed25519 (FIPS 186-5) and SHA-256 are used.",
+		Code:      []string{"scripts/build-release.sh", "docs/SUPPLY_CHAIN.md"},
+		Customer:  "Record the CMVP certificate number of the Go Cryptographic Module in the SSP and run hosts in FIPS mode."},
+	{ID: "SC-39", Title: "Process Isolation", Status: "implemented",
+		Statement: "Each run uses its own git worktree, and every agent command runs in a fresh bubblewrap sandbox whose process group is killed on timeout.",
+		Code:      []string{"internal/tools/exec.go", "internal/gitx/gitx.go"},
+		Tests:     []string{"TestSandboxIsolation", "TestTimeoutKillsProcessGroup", "TestHookRunsInSandbox"},
+		Policy:    []string{"sandbox.mode"}},
+	{ID: "SI-7", Title: "Software, Firmware, and Information Integrity", Status: "implemented",
+		Statement: "Binary integrity is checked against the signed manifest and provenance at start; model weights are pinned by SHA-256 in the signed lock, the served model's Ollama digest is checked, and weight files are refused unless their content is GGUF or safetensors.",
+		Code:      []string{"internal/modelpin/modelpin.go", "internal/modelpin/format.go"},
+		Tests:     []string{"TestVerifyArtifacts", "TestCheckOllama", "TestPickleNamedGGUFIsRefused", "TestPickleLockEntryAndDirtyScanFailPreflight"},
+		Policy:    []string{"model.verify_digest", "model.lock"}},
+	{ID: "SI-10", Title: "Information Input Validation", Status: "implemented",
+		Statement: "Model tool calls are parsed defensively, repaired, and validated against each tool's schema; unparseable arguments are reported back rather than guessed. Content marked above the repository's classification is withheld from the model and blocks proposals; added lines are scanned for secrets.",
+		Code:      []string{"internal/llm/toolparse.go", "internal/llm/validate.go", "internal/marking/marking.go", "internal/secrets/secrets.go"},
+		Tests:     []string{"TestValidateArgs", "FuzzValidateArgs", "TestUnparseableArgsReportedToModel", "TestSpillageWithheldFromModel", "TestRunWithSecretIsBlocked", "FuzzScanDiff"},
+		Policy:    []string{"classification", "spillage_guard", "secrets.allow"}},
+	{ID: "SR-3", Title: "Supply Chain Controls and Processes", Status: "implemented",
+		Statement: "Go standard library only, a pinned patched toolchain, offline reproducible builds, a CycloneDX SBOM and AI-BOM, models restricted by country of origin and lineage, and a malware scan at model staging.",
+		Code:      []string{"go.mod", "internal/supply/sbom.go", "internal/supply/aibom.go", "internal/modelpin/origin.go", "scripts/stage-models.sh"},
+		Tests:     []string{"TestGoModHasNoRequires", "TestCheckOrigin", "TestDeniedModelOriginIsFatalEvenInWarnMode"},
+		Policy:    []string{"model.denied_origins", "model.allowed_origins", "model.origin_exception"}},
+	{ID: "SR-4", Title: "Provenance", Status: "implemented",
+		Statement: "Each release carries signed SLSA v1 build provenance (in-toto, DSSE) naming source commit, toolchain hash and build parameters. Each landed change carries a signed evidence record naming the model, its revision, quantization, origin and generation settings.",
+		Code:      []string{"internal/supply/provenance.go", "internal/supply/dsse.go", "internal/evidence/evidence.go"},
+		Tests:     []string{"TestPAESpecVector", "TestProvenanceSignVerify", "TestLandWritesVerifiableEvidence"}},
+	{ID: "SR-11", Title: "Component Authenticity", Status: "implemented",
+		Statement: "Upstream weight shards are pinned by the SHA-256 published at an exact hub revision; staging verifies every shard, quantizes with a pinned llama.cpp commit, and signs the lock. The high side re-hashes every artifact before loading.",
+		Code:      []string{"models/models.lock.json", "scripts/stage-models.sh", "internal/modelpin/modelpin.go"},
+		Tests:     []string{"TestRepoLockParses", "TestRepoLockRecordsOrigins", "TestLockFormats"}},
+}

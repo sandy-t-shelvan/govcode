@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/sandy-t-shelvan/govcode/internal/app"
+	"github.com/sandy-t-shelvan/govcode/internal/ato"
 	"github.com/sandy-t-shelvan/govcode/internal/audit"
 	"github.com/sandy-t-shelvan/govcode/internal/eval"
 	"github.com/sandy-t-shelvan/govcode/internal/evidence"
@@ -55,6 +56,10 @@ Audit:
 
 Editor integration:
   govcode serve --stdio           JSON-RPC 2.0 over stdin/stdout for the VS Code extension (no sockets)
+
+Assessment:
+  govcode ato -o dir [-stig xccdf] [-stig-map f] [-govulncheck f] [-test-json f]
+                                  ATO evidence package (800-53 statements, DoWI 8430.01, STIG CKLB, VEX); self-assessment only
 
 Setup and supply chain:
   govcode verify                  preflight: policy, release signature, model lock, served model, sandbox, keys, audit
@@ -114,6 +119,8 @@ func main() {
 		err = cmdSign(args)
 	case "evidence":
 		err = cmdEvidence(args)
+	case "ato":
+		err = cmdATO(args)
 	case "provenance":
 		err = cmdProvenance(args)
 	case "attest":
@@ -1019,5 +1026,110 @@ func cmdEvidenceExport(args []string) error {
 	sum, _, _ := modelpin.HashFile(*out)
 	fmt.Printf("== %s ==\nwrote %s: %d verified record(s), sha256 %s\nThe export is classified at %s; handle it like the audit log.\n",
 		a.Policy.Classification, *out, len(exp.Records), sum, a.Policy.Classification)
+	return nil
+}
+
+func cmdATO(args []string) error {
+	fs, pol := flags("ato")
+	out := fs.String("o", "", "output directory (must not exist or be empty)")
+	stig := fs.String("stig", "", "official ASD STIG XCCDF (from DISA) to build the checklist from")
+	stigMap := fs.String("stig-map", "", "site rule map JSON: statuses and comments by V-ID")
+	vuln := fs.String("govulncheck", "", "`govulncheck -json ./...` output for the VEX document")
+	testJSON := fs.String("test-json", "", "`go test -json ./...` output for the test summary")
+	auditN := fs.Int("audit-n", 20, "audit entries to sample")
+	parse(fs, args)
+	if *out == "" {
+		return errors.New("usage: govcode ato -o <dir> [-stig xccdf] [-stig-map f] [-govulncheck f] [-test-json f]")
+	}
+	host, _ := os.Hostname()
+	in := ato.Inputs{Version: supply.Version, Host: host, Now: time.Now()}
+
+	a, checks, oerr := app.Open(*pol, io.Discard, false)
+	for _, c := range checks {
+		in.Preflight = append(in.Preflight, map[string]any{"name": c.Name, "status": c.Status, "detail": c.Detail})
+	}
+	if oerr != nil {
+		in.Preflight = append(in.Preflight, map[string]any{"name": "open", "status": "FAIL", "detail": oerr.Error()})
+		fmt.Fprintln(os.Stderr, "warning: policy not loaded; configuration and audit sample omitted:", oerr)
+	}
+	if a != nil && a.Policy != nil {
+		p := a.Policy
+		in.Classification = p.Classification
+		var analyzers []string
+		for _, x := range p.Analysis.Analyzers {
+			analyzers = append(analyzers, x.Name)
+		}
+		in.Policy = map[string]any{
+			"path": p.Path, "classification": p.Classification, "enforce": p.Trust.Enforce, "repo_root": p.RepoRoot,
+			"target_branch": p.TargetBranch, "sensitive": p.Sensitive, "two_person_rule": p.TwoPersonRule,
+			"approvers": len(p.Approvers), "sandbox_mode": p.Sandbox.Mode, "spillage_guard": p.SpillageGuard == nil || *p.SpillageGuard,
+			"require_plan_approval": p.RequirePlanApproval, "audit_require_append_only": p.Audit.RequireAppendOnly,
+			"analysis_required": p.Analysis.Required, "analyzers": analyzers, "model_id": p.Model.ID,
+			"denied_origins": p.Model.DeniedOrigins, "allowed_origins": p.Model.AllowedOrigins,
+			"origin_exception": p.Model.OriginException != nil, "siem_syslog": p.SIEM.Syslog,
+			"release_provenance": p.Trust.ReleaseProvenance != "",
+		}
+		if a.Log != nil && *auditN > 0 {
+			var ring []map[string]any
+			a.Log.Each(func(e *audit.Entry, _ []byte) error {
+				ring = append(ring, map[string]any{"seq": e.Seq, "ts": e.Time, "kind": e.Kind, "actor": e.Actor.Username,
+					"uid": e.Actor.UID, "session": e.Session, "summary": e.Summary, "hash": e.Hash})
+				if len(ring) > *auditN {
+					ring = ring[1:]
+				}
+				return nil
+			})
+			in.AuditSample = append([]map[string]any{}, ring...)
+		}
+	}
+	if *stig != "" {
+		f, err := os.Open(*stig)
+		if err != nil {
+			return err
+		}
+		in.Benchmark, err = ato.ParseXCCDF(f)
+		f.Close()
+		if err != nil {
+			return fmt.Errorf("%s: %w", *stig, err)
+		}
+	}
+	if *stigMap != "" {
+		m, err := ato.LoadSiteRuleMap(*stigMap)
+		if err != nil {
+			return err
+		}
+		in.Site = m
+	}
+	if *vuln != "" {
+		f, err := os.Open(*vuln)
+		if err != nil {
+			return err
+		}
+		doc, sum, err := ato.VEX(f, "github.com/sandy-t-shelvan/govcode", supply.Version, in.Now)
+		f.Close()
+		if err != nil {
+			return err
+		}
+		in.VEX, in.VEXSummary = doc, &sum
+	}
+	if *testJSON != "" {
+		f, err := os.Open(*testJSON)
+		if err != nil {
+			return err
+		}
+		in.Tests, err = ato.SummarizeGoTest(f)
+		f.Close()
+		if err != nil {
+			return err
+		}
+	}
+	files, err := ato.Write(*out, in)
+	if err != nil {
+		return err
+	}
+	if in.Classification != "" {
+		fmt.Printf("== %s ==\n", in.Classification)
+	}
+	fmt.Printf("wrote %d files to %s\n%s\n", len(files), *out, ato.Disclaimer)
 	return nil
 }
