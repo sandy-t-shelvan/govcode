@@ -780,7 +780,7 @@ func cmdEval(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("eval", flag.ExitOnError)
 	tasks := fs.String("tasks", "eval/tasks", "task directory")
 	out := fs.String("o", "eval/results", "results directory")
-	only := fs.String("only", "", "run only tasks whose id contains this")
+	only := fs.String("only", "", "run only tasks whose id contains this (comma-separated list allowed)")
 	backend := fs.String("backend", "ollama", "ollama | openai | oracle")
 	endpoint := fs.String("endpoint", "http://127.0.0.1:11434", "model server (loopback)")
 	model := fs.String("model", "govcode-devstral:24b-q4km", "served model name")

@@ -72,7 +72,11 @@ type Report struct {
 	Started string       `json:"started"`
 	Results []TaskResult `json:"results"`
 	Totals  Totals       `json:"totals"`
-	Path    string       `json:"-"`
+	// Complete is false while the run is in progress or if it was
+	// interrupted; the report is rewritten after every task so a long run
+	// that is killed keeps the tasks it finished.
+	Complete bool   `json:"complete"`
+	Path     string `json:"-"`
 }
 
 type Totals struct {
@@ -113,12 +117,26 @@ func LoadTasks(dir, only string) ([]Task, error) {
 			return nil, fmt.Errorf("%s: %w", e.Name(), err)
 		}
 		t.Dir = filepath.Join(dir, e.Name())
-		if only == "" || strings.Contains(t.ID, only) {
+		if matchOnly(t.ID, only) {
 			ts = append(ts, t)
 		}
 	}
 	sort.Slice(ts, func(i, j int) bool { return ts[i].ID < ts[j].ID })
 	return ts, nil
+}
+
+// matchOnly reports whether id is selected by only: empty selects all,
+// otherwise any comma-separated part contained in id selects it.
+func matchOnly(id, only string) bool {
+	if only == "" {
+		return true
+	}
+	for _, p := range strings.Split(only, ",") {
+		if p = strings.TrimSpace(p); p != "" && strings.Contains(id, p) {
+			return true
+		}
+	}
+	return false
 }
 
 func Run(ctx context.Context, cfg Config) (*Report, error) {
@@ -134,23 +152,43 @@ func Run(ctx context.Context, cfg Config) (*Report, error) {
 		r := runTask(ctx, cfg, t, rep)
 		rep.Results = append(rep.Results, r)
 		fmt.Fprintf(cfg.Log, "[%s] passed=%v %s\n", t.ID, r.Passed, r.Skipped+r.Error)
+		rep.total()
 		if ctx.Err() != nil {
 			break
 		}
+		rep.save(cfg.OutDir)
 	}
 	rep.total()
-	if cfg.OutDir != "" {
-		os.MkdirAll(cfg.OutDir, 0o755)
-		name := strings.NewReplacer(":", "_", "/", "_").Replace(rep.Model)
-		rep.Path = filepath.Join(cfg.OutDir, fmt.Sprintf("%s-%s.json", time.Now().UTC().Format("20060102-150405"), name))
-		b, _ := json.MarshalIndent(rep, "", "  ")
-		os.WriteFile(rep.Path, b, 0o644)
-		md := strings.TrimSuffix(rep.Path, ".json") + ".md"
-		f, _ := os.Create(md)
-		rep.Markdown(f)
-		f.Close()
-	}
+	rep.Complete = ctx.Err() == nil && len(rep.Results) == len(tasks)
+	rep.save(cfg.OutDir)
 	return rep, nil
+}
+
+// save writes the JSON and Markdown reports. The path is fixed on the first
+// call so each rewrite replaces the same files.
+func (r *Report) save(dir string) {
+	if dir == "" {
+		return
+	}
+	if r.Path == "" {
+		os.MkdirAll(dir, 0o755)
+		name := strings.NewReplacer(":", "_", "/", "_").Replace(r.Model)
+		r.Path = filepath.Join(dir, fmt.Sprintf("%s-%s.json", time.Now().UTC().Format("20060102-150405"), name))
+	}
+	b, _ := json.MarshalIndent(r, "", "  ")
+	writeAtomic(r.Path, b)
+	var md strings.Builder
+	r.Markdown(&md)
+	writeAtomic(strings.TrimSuffix(r.Path, ".json")+".md", []byte(md.String()))
+}
+
+// writeAtomic replaces path via a temp file so a kill mid-write never leaves
+// a truncated report.
+func writeAtomic(path string, b []byte) {
+	tmp := path + ".tmp"
+	if os.WriteFile(tmp, b, 0o644) == nil {
+		os.Rename(tmp, path)
+	}
 }
 
 func runTask(ctx context.Context, cfg Config, t Task, rep *Report) (res TaskResult) {
@@ -297,6 +335,7 @@ func oracleBackend(t Task) llm.Backend {
 }
 
 func (r *Report) total() {
+	r.Totals = Totals{ParsedBy: map[string]int{}}
 	t := &r.Totals
 	for _, x := range r.Results {
 		t.Tasks++
