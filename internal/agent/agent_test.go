@@ -160,3 +160,22 @@ func TestNagRepeatsToolPrompt(t *testing.T) {
 		t.Error("nag without a tool prompt changed")
 	}
 }
+
+// A server that does not report usage (llama-cpp-python when streaming) must
+// show up as unreported turns, not as a measured zero.
+func TestUsageUnreportedTurnsAreCounted(t *testing.T) {
+	env := fixture(t)
+	model := &llm.Scripted{Responses: []llm.Response{
+		{ToolCalls: []llm.ToolCall{native("read_file", map[string]any{"path": "sum.c"})}, Usage: llm.Usage{PromptTokens: 120, CompletionTokens: 9}},
+		{ToolCalls: []llm.ToolCall{native("read_file", map[string]any{"path": "sum.c"})}}, // no usage
+		{ToolCalls: []llm.ToolCall{native("finish", map[string]any{"summary": "nothing to do"})}, Usage: llm.Usage{PromptTokens: 300, CompletionTokens: 5}},
+	}}
+	res, err := (&Agent{Backend: model, Tools: tools.NewSet(env), Rec: &rec{}}).Run(context.Background(), "look", RepoContext{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := res.Metrics
+	if m.UsageUnreported != 1 || m.PromptTokens != 420 || m.CompletionTokens != 14 {
+		t.Fatalf("usage metrics: unreported=%d prompt=%d completion=%d", m.UsageUnreported, m.PromptTokens, m.CompletionTokens)
+	}
+}

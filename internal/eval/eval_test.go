@@ -138,3 +138,18 @@ func TestReportSavedAfterEachTask(t *testing.T) {
 		t.Fatal("first task's report was not on disk before the second finished")
 	}
 }
+
+func TestPrintQualifiesUnreportedTokens(t *testing.T) {
+	var b strings.Builder
+	r := &Report{Model: "m", Totals: Totals{Turns: 10, PromptTokens: 500, OutputTokens: 40, UsageUnreported: 4, ParsedBy: map[string]int{}}}
+	r.Print(&b)
+	if !strings.Contains(b.String(), "500 prompt, 40 output (lower bound: the server reported no usage for 4 of 10 turns)") {
+		t.Fatalf("token line:\n%s", b.String())
+	}
+	b.Reset()
+	r.Totals.UsageUnreported = 0
+	r.Print(&b)
+	if strings.Contains(b.String(), "lower bound") {
+		t.Fatal("qualified although every turn reported usage")
+	}
+}
