@@ -90,9 +90,13 @@ type Metrics struct {
 	ContextTrims     int            `json:"context_trims"`
 	PromptTokens     int            `json:"prompt_tokens"`
 	CompletionTokens int            `json:"completion_tokens"`
-	ModelTime        time.Duration  `json:"model_time_ns"`
-	Finished         bool           `json:"finished"`
-	StopReason       string         `json:"stop_reason"`
+	// UsageUnreported counts turns whose reply carried no token usage (for
+	// example llama-cpp-python ignores stream_options.include_usage), so
+	// the token totals above are a lower bound, not a measurement of zero.
+	UsageUnreported int           `json:"usage_unreported_turns,omitempty"`
+	ModelTime       time.Duration `json:"model_time_ns"`
+	Finished        bool          `json:"finished"`
+	StopReason      string        `json:"stop_reason"`
 }
 
 // ValidCallRate is the fraction of emitted calls that named a real tool and
@@ -215,6 +219,9 @@ func (a *Agent) Run(ctx context.Context, task string, rc RepoContext) (*Result, 
 		}
 		m.PromptTokens += resp.Usage.PromptTokens
 		m.CompletionTokens += resp.Usage.CompletionTokens
+		if resp.Usage.PromptTokens == 0 && resp.Usage.CompletionTokens == 0 {
+			m.UsageUnreported++ // a real reply always consumes prompt tokens
+		}
 
 		calls, content := resp.ToolCalls, resp.Content
 		if len(calls) == 0 {

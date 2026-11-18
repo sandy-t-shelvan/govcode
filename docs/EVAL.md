@@ -59,6 +59,7 @@ A model whose chat template drops its tool-calling instruction when a system pro
 | no-call turns | Replies with prose and no tool call. govcode nudges up to 3 times, then stops. |
 | tasks passed | The hidden checker passed on the final tree. |
 | finished | The model called `finish` and the test gate accepted it. |
+| model tokens | Prompt and output tokens the server reported. Some servers send no usage on streamed replies (llama-cpp-python ignores `stream_options.include_usage`); those turns are counted in `usage_unreported_turns` and the totals are marked as a lower bound. |
 
 Suggested go/no-go for the one-week proof: **valid tool calls ≥ 95%** and **tasks passed ≥ 7/10** for the chosen model and quantization. If validity is high but executed-without-error is low, check the edit failures in the JSON before blaming the model.
 

@@ -95,7 +95,9 @@ type Totals struct {
 	Finished      int            `json:"finished"`
 	PromptTokens  int            `json:"prompt_tokens"`
 	OutputTokens  int            `json:"output_tokens"`
-	ModelSeconds  float64        `json:"model_seconds"`
+	// UsageUnreported is the number of turns whose reply had no token usage.
+	UsageUnreported int     `json:"usage_unreported_turns,omitempty"`
+	ModelSeconds    float64 `json:"model_seconds"`
 }
 
 func LoadTasks(dir, only string) ([]Task, error) {
@@ -360,6 +362,7 @@ func (r *Report) total() {
 		t.Turns += m.Turns
 		t.PromptTokens += m.PromptTokens
 		t.OutputTokens += m.CompletionTokens
+		t.UsageUnreported += m.UsageUnreported
 		t.ModelSeconds += m.ModelTime.Seconds()
 		for k, v := range m.ParsedBy {
 			t.ParsedBy[k] += v
@@ -395,6 +398,15 @@ func (r *Report) Print(w io.Writer) {
 	fmt.Fprintf(w, "executed without error:%s  (e.g. old_text matched)\n", " "+pct(t.ExecOK, t.CallsEmitted))
 	fmt.Fprintf(w, "turns with no call:    %d\n", t.NoCallTurns)
 	fmt.Fprintf(w, "parse path:            %s\n", parsed(t.ParsedBy))
+	fmt.Fprintf(w, "model tokens:          %d prompt, %d output%s\n", t.PromptTokens, t.OutputTokens, unreported(t.UsageUnreported, t.Turns))
+}
+
+// unreported qualifies token totals when the server did not report usage.
+func unreported(n, turns int) string {
+	if n == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" (lower bound: the server reported no usage for %d of %d turns)", n, turns)
 }
 
 func parsed(m map[string]int) string {
