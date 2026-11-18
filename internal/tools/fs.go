@@ -134,8 +134,8 @@ func (t *search) Run(ctx context.Context, a map[string]any) (string, error) {
 	args = append(args, ":(exclude).govcode")
 	// Stream git grep: a broad pattern on a large repository can match
 	// hundreds of thousands of lines. Only the lines that will be shown get
-	// the spillage scan; the rest are just counted (respecting deny rules,
-	// cached per file), so cost and memory stay bounded.
+	// the spillage scan; the rest are just counted (respecting read
+	// permission, cached per file), so cost and memory stay bounded.
 	cmd := exec.CommandContext(ctx, "git", args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -144,15 +144,35 @@ func (t *search) Run(ctx context.Context, a map[string]any) (string, error) {
 	if err := cmd.Start(); err != nil {
 		return "", fmt.Errorf("search failed: %v", err)
 	}
-	denied := map[string]bool{}
-	isDenied := func(file string) bool {
-		d, ok := denied[file]
-		if !ok {
-			dec, _ := t.e.rules().Decide("read_file", file)
-			d = dec == permissions.Deny
-			denied[file] = d
+	// show caches the per-file decision. Search returns file text, so an
+	// ask rule is not an allow: read_file would prompt, and with no
+	// approver attached that prompt is a deny. Denied and unanswered
+	// ask hits are dropped here, before the cap, so they are neither
+	// shown nor counted.
+	show := map[string]bool{}
+	canShow := func(file string) bool {
+		if v, ok := show[file]; ok {
+			return v
 		}
-		return d
+		dec, rule := t.e.rules().Decide("read_file", file)
+		ok := dec == permissions.Allow
+		if dec == permissions.Ask {
+			who := "policy"
+			if t.e.Approver == nil {
+				rule += " (ask, but no human approver is attached)"
+			} else if yes, by := t.e.Approver.Approve(fmt.Sprintf("search(%s)", file)); yes {
+				ok, who = true, by
+			} else {
+				who = by
+			}
+			decision := permissions.Deny.String()
+			if ok {
+				decision = permissions.Allow.String()
+			}
+			t.e.emit("permission", map[string]any{"tool": "search", "subject": clip(file, 300), "decision": decision, "rule": rule, "by": who})
+		}
+		show[file] = ok
+		return ok
 	}
 	var lines []string
 	hidden, more := 0, 0
@@ -162,7 +182,7 @@ func (t *search) Run(ctx context.Context, a map[string]any) (string, error) {
 		if l = strings.TrimRight(l, "\n"); l != "" {
 			file, rest, _ := strings.Cut(l, ":")
 			switch {
-			case isDenied(file):
+			case !canShow(file):
 			case len(lines) >= maxSearchResults:
 				more++
 			case t.e.spill("search result in "+file, rest):
