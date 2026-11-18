@@ -113,6 +113,73 @@ func TestSpillageWithheldFromModel(t *testing.T) {
 	}
 }
 
+// An ask rule on read_file withholds the file until a human approves, and
+// with no approver it denies. Search returns the same text, so it must not
+// treat that rule as an allow, and it must not count the hidden lines.
+func TestSearchAskRuleIsNotABypass(t *testing.T) {
+	e := repo(t, map[string]string{
+		"credentials/token.txt": "token = supersecret\ntoken = second\n",
+		"src/a.c":               "int token_len;\n",
+	})
+	e.Perms, _ = permissions.Parse(nil, []string{"read_file(credentials/**)"}, nil)
+	evs := collect(e)
+	s := NewSet(e)
+
+	if _, err := call(t, s, "read_file", map[string]any{"path": "credentials/token.txt"}); err == nil || !strings.Contains(err.Error(), "denied") {
+		t.Fatalf("read_file ask with no approver: %v", err)
+	}
+	out, err := call(t, s, "search", map[string]any{"pattern": "token"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "supersecret") || strings.Contains(out, "credentials/") {
+		t.Fatalf("search leaked an ask path with no approver:\n%s", out)
+	}
+	if !strings.Contains(out, "src/a.c") || strings.Contains(out, "more matches") {
+		t.Fatalf("allowed match missing or hidden match counted:\n%s", out)
+	}
+
+	ap := &approveAll{}
+	e.Approver = ap
+	out, err = call(t, s, "search", map[string]any{"pattern": "token"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "supersecret") || !strings.Contains(out, "second") || !strings.Contains(out, "src/a.c") {
+		t.Fatalf("approved search hid the file:\n%s", out)
+	}
+	if len(ap.asked) != 1 || ap.asked[0] != "search(credentials/token.txt)" {
+		t.Fatalf("approver asked %v, want one prompt for the file", ap.asked)
+	}
+
+	no := &denyAll{}
+	e.Approver = no
+	out, err = call(t, s, "search", map[string]any{"pattern": "token"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "supersecret") || strings.Contains(out, "credentials/") {
+		t.Fatalf("search showed a file the human denied:\n%s", out)
+	}
+	if len(no.asked) != 1 {
+		t.Fatalf("denying approver asked %v", no.asked)
+	}
+
+	var decisions []string
+	for _, ev := range evs() {
+		if ev.Kind != "permission" {
+			continue
+		}
+		m := ev.Data.(map[string]any)
+		if m["tool"] == "search" {
+			decisions = append(decisions, m["decision"].(string)+":"+m["subject"].(string))
+		}
+	}
+	if strings.Join(decisions, ",") != "deny:credentials/token.txt,allow:credentials/token.txt,deny:credentials/token.txt" {
+		t.Fatalf("search permission events %v", decisions)
+	}
+}
+
 func TestPermissionDecisionsAudited(t *testing.T) {
 	e := repo(t, map[string]string{"a": "x"})
 	e.Allowlist = []string{"make"}
