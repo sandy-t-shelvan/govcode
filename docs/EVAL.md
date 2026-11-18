@@ -104,7 +104,7 @@ What it shows:
   4. The no-call nag did not repeat the model's format, so it kept answering in prose. It now does.
   5. An eval killed part-way lost every finished task. The report is now saved after every task.
 - **The full path with a real model** (run, then a `ready` proposal, approve, landed commit, `audit verify`, `evidence`) was shown on the eighth full `run` attempt on task 01. All of it ran air-gapped in the same loopback-only namespace.
-  - Earlier attempts ended `incomplete`, at the turn limit, or with no tool call; that is model variance, since the eval passed this task twice. On the successful attempt, govcode refused three mismatched edits before Granite copied the text exactly.
+  - Earlier attempts ended `incomplete`, at the turn limit, or with no tool call; most likely model variance. The eval ran this task once and passed, which is too small a sample to show that `run` (streamed replies) behaves differently from `eval` (non-streamed); both use the same prompt, seed and sampling settings. On the successful attempt, govcode refused three mismatched edits before Granite copied the text exactly.
   - The run passed `make test` and the hidden checker, and landed with every `Govcode-*` trailer. `audit verify` passed with 293 entries and the evidence record verified.
   - The fix is correct, but Granite put it on one line with the next statement. A human reviewer would likely send that back. Here approval used the dev-policy `--yes` path (`allow_non_interactive_approval`) because the host has no TTY, so nobody read the diff.
 
