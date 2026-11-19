@@ -2,7 +2,7 @@
   "name": "govcode",
   "displayName": "govcode",
   "description": "Air-gapped coding agent for legacy code: local model, sandboxed tools, signed audit log, two-person approval.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "govcode-local",
   "license": "MIT",
   "engines": { "vscode": "^1.85.0" },
