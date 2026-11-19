@@ -26,9 +26,9 @@ type Control struct {
 // Controls is the catalog. Titles are the Rev 5 control names.
 var Controls = []Control{
 	{ID: "AC-3", Title: "Access Enforcement", Status: "implemented",
-		Statement: "govcode operates on exactly one repository named in the root-owned policy and refuses any other. Every file tool resolves paths through a jail that rejects absolute paths outside the worktree, '..' escapes, outward symlinks, .git and .govcode. Allow/ask/deny rules (deny beats ask beats allow) are checked inside every tool; denied paths are also removed from listings and search results.",
+		Statement: "govcode operates on exactly one repository named in the root-owned policy and refuses any other. Every file tool resolves paths through a jail that rejects absolute paths outside the worktree, '..' escapes, outward symlinks, .git and .govcode. Allow/ask/deny rules (deny beats ask beats allow) are checked inside every tool. read_file rules also govern every tool that reveals file content (outline, edit_file diffs, search), and paths read_file would refuse are removed from listings and search results.",
 		Code:      []string{"internal/tools/jail.go", "internal/permissions/permissions.go", "internal/policy/policy.go"},
-		Tests:     []string{"TestJail", "FuzzJailResolve", "TestDenyRulesHidePaths", "TestPrecedenceAndDefaults", "TestCheckRepo"},
+		Tests:     []string{"TestJail", "FuzzJailResolve", "TestDenyRulesHidePaths", "TestReadRulesCoverEveryContentTool", "TestPrecedenceAndDefaults", "TestCheckRepo"},
 		Policy:    []string{"repo_root", "permissions.allow", "permissions.ask", "permissions.deny"}},
 	{ID: "AC-5", Title: "Separation of Duties", Status: "implemented",
 		Statement: "The agent can only create proposals on govcode/proposal/<id>; it never writes the target branch. Landing requires an approver listed in policy. With two_person_rule (forced by sensitive: true) the approver's kernel uid must differ from the proposer's, and the approver types 'approve' on /dev/tty, so piped input cannot approve. scripts/e2e/two-person.sh checks this in CI with three real OS users against a signed release.",
