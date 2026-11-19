@@ -95,7 +95,17 @@ func (t *editFile) Run(ctx context.Context, a map[string]any) (string, error) {
 	if t.e.OnEdit != nil {
 		t.e.OnEdit(t.e.Jail.Rel(abs))
 	}
-	return fmt.Sprintf("Edited %s (%d replacement(s))%s.\n%s%s", rel, map[bool]int{true: count, false: 1}[n == -1], note, fileDiff(t.e.Jail.Root, abs), t.e.postEdit(ctx, t.e.Jail.Rel(abs))), nil
+	// git diff context and deleted lines are file text. A banner on the
+	// neighbouring line, or a portion mark removed by this edit, would
+	// otherwise be handed to the model even though read_file withholds
+	// the same bytes.
+	diff := fileDiff(t.e.Jail.Root, abs)
+	if t.e.spill("edit diff for "+t.e.Jail.Rel(abs), diff) {
+		diff = withheld("diff of "+t.e.Jail.Rel(abs), t.e) + "\n"
+	} else {
+		diff = headTail(diff, 4000)
+	}
+	return fmt.Sprintf("Edited %s (%d replacement(s))%s.\n%s%s", rel, map[bool]int{true: count, false: 1}[n == -1], note, diff, t.e.postEdit(ctx, t.e.Jail.Rel(abs))), nil
 }
 
 func toCRLF(s string) string {
@@ -145,7 +155,7 @@ func fileDiff(root, abs string) string {
 	if len(out) == 0 {
 		out, _ = exec.Command("git", "-C", root, "diff", "--no-color", "--no-index", "-U2", "/dev/null", abs).Output()
 	}
-	return headTail(string(out), 4000)
+	return string(out)
 }
 
 // ---- create_file ----

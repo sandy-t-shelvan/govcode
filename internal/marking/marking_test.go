@@ -1,6 +1,9 @@
 package marking
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParseLevel(t *testing.T) {
 	for in, want := range map[string]Level{
@@ -62,6 +65,30 @@ func TestNoFalsePositives(t *testing.T) {
 	}
 }
 
+// A unified diff puts one marker byte in front of every file line.
+// "-(TS) …" and "-TOP SECRET" are the file's own text; a '-' that is
+// not inside a hunk is not a diff and must not become a marking.
+func TestScanSeesMarkingsBehindDiffMarkers(t *testing.T) {
+	diff := strings.Join([]string{
+		"diff --git a/doc.c b/doc.c",
+		"--- a/doc.c",
+		"+++ b/doc.c",
+		"@@ -1,3 +1,3 @@",
+		"-(TS) payload coordinates",
+		"-TOP SECRET",
+		"+// (S) allowed in this repo",
+		" int mode = 4;",
+	}, "\n")
+	fs := Above(diff, S)
+	if len(fs) != 2 || fs[0].Line != 5 || fs[0].Level != TS || fs[1].Line != 6 || fs[1].Level != TS {
+		t.Fatalf("Above(diff) = %+v", fs)
+	}
+	plain := "-(TS) payload coordinates\n-TOP SECRET\n"
+	if got := Scan(plain); len(got) != 0 {
+		t.Fatalf("a dash outside a hunk was treated as a diff marker: %+v", got)
+	}
+}
+
 func TestAbove(t *testing.T) {
 	text := "line one\n// (S//NF) radar\n/* TOP SECRET//SI */\n(U) ok"
 	fs := Above(text, S)
@@ -79,6 +106,7 @@ func TestAbove(t *testing.T) {
 func FuzzScan(f *testing.F) {
 	f.Add("TOP SECRET//SI")
 	f.Add("(S) x")
+	f.Add("@@ -1,2 +1,2 @@\n-(TS) payload\n-TOP SECRET\n")
 	f.Fuzz(func(t *testing.T, s string) {
 		for _, fd := range Scan(s) {
 			if fd.Level < U || fd.Level > TS || fd.Line < 1 {

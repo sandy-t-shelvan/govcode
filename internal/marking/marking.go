@@ -66,6 +66,10 @@ var (
 	reHeader = regexp.MustCompile(`(?i:classification)\s*:\s*(TOP SECRET|SECRET|CONFIDENTIAL|UNCLASSIFIED)\b`)
 	// Portion marks at the start of a line or comment: "(TS//SI) text", "(S) text"
 	rePortion = regexp.MustCompile(`^\s*(?://+|/\*+|\*|--|\*>|#|!|;|[Cc]\s)?\s*\((TS|S|C|U)(?://[A-Z0-9][A-Z0-9 ,/-]*)?\)\s`)
+	// A unified-diff hunk header. Body lines of that hunk start with one
+	// marker byte ('+', '-' or ' ') that would hide a banner line or a
+	// portion mark from the anchored patterns above.
+	reHunk = regexp.MustCompile(`^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@`)
 )
 
 // Finding is one detected marking. It never carries the surrounding text.
@@ -75,10 +79,29 @@ type Finding struct {
 }
 
 // Scan returns every marking found in text, with 1-based line numbers.
+//
+// Unified diffs are scanned too. Once a hunk header has been seen, the
+// leading '+', '-' or space on each body line is not part of the file
+// text: "-TOP SECRET" and "-(TS) payload" are the same markings as the
+// file lines they came from. A '-' or '+' outside a hunk is left alone,
+// so ordinary source lines are not re-read as diffs.
 func Scan(text string) []Finding {
 	var out []Finding
+	inHunk := false
 	for i, line := range strings.Split(text, "\n") {
-		if l := lineLevel(line); l != Unknown {
+		if strings.HasPrefix(line, "diff --git ") || strings.HasPrefix(line, "diff --cc ") {
+			inHunk = false
+		} else if strings.HasPrefix(line, "@@") && reHunk.MatchString(line) {
+			inHunk = true
+		}
+		scanned := line
+		if inHunk && line != "" {
+			switch line[0] {
+			case '+', '-', ' ':
+				scanned = line[1:]
+			}
+		}
+		if l := lineLevel(scanned); l != Unknown {
 			out = append(out, Finding{Line: i + 1, Level: l})
 		}
 	}
