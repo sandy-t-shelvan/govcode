@@ -64,8 +64,11 @@ func (t *listFiles) Run(ctx context.Context, a map[string]any) (string, error) {
 		if pat != "" && !globMatch(pat, f) {
 			continue
 		}
-		if d, _ := t.e.rules().Decide("read_file", f); d == permissions.Deny {
-			continue // denied paths are not even listed
+		// Paths read_file would refuse are not even listed: deny, or ask
+		// with no human approver attached. With an approver the name is
+		// listed and read_file asks when the content is requested.
+		if d, _ := t.e.rules().Decide("read_file", f); d == permissions.Deny || (d == permissions.Ask && t.e.Approver == nil) {
+			continue
 		}
 		files = append(files, f)
 	}

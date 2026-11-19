@@ -3,6 +3,8 @@ package tools
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -47,8 +49,8 @@ func TestDenyRulesHidePaths(t *testing.T) {
 	if strings.Contains(out, "src/b.c") || strings.Contains(out, "keys/") || !strings.Contains(out, "src/a.c") {
 		t.Errorf("search leaked denied paths:\n%s", out)
 	}
-	if _, err := call(t, s, "outline", map[string]any{"path": "src/b.c"}); err != nil {
-		t.Logf("outline denied only by explicit outline rule; got %v", err)
+	if _, err := call(t, s, "outline", map[string]any{"path": "src/b.c"}); err == nil || !strings.Contains(err.Error(), "denied by policy") {
+		t.Errorf("outline of a read-denied file: %v", err)
 	}
 }
 
@@ -272,5 +274,93 @@ func TestSearchPathWithColons(t *testing.T) {
 	}
 	if !strings.Contains(out, "a:1:b.txt:2:ok line") || !strings.Contains(out, "withheld") {
 		t.Fatalf("colon path hit missing or misparsed:\n%s", out)
+	}
+}
+
+// Every tool that shows file content (or discovers file names) must honor the
+// read_file rules for that path, not only its own tool's rules. Permission
+// rules match the exact tool name, so a policy that denies read_file(keys/**)
+// must still keep keys/ out of outline, edit_file diffs and file listings.
+func TestReadRulesCoverEveryContentTool(t *testing.T) {
+	const secret = "int secret_fn(void)\n{\n    return 4242;\n}\n"
+	type tc struct {
+		tool string
+		args map[string]any
+		// discovers: the tool finds paths itself (search, list_files), so the
+		// protected path must not appear at all. Tools given the path by the
+		// model may name it in their refusal.
+		discovers bool
+	}
+	calls := []tc{
+		{"read_file", map[string]any{"path": "keys/creds.h"}, false},
+		{"outline", map[string]any{"path": "keys/creds.h"}, false},
+		{"edit_file", map[string]any{"path": "keys/creds.h", "old_text": "return", "new_text": "return  "}, false},
+		{"search", map[string]any{"pattern": "secret_fn|4242|ok_fn"}, true},
+		{"list_files", map[string]any{}, true},
+	}
+	setups := []struct {
+		name     string
+		rules    func() (*permissions.Rules, error)
+		approver func() Approver
+	}{
+		{"deny", func() (*permissions.Rules, error) { return permissions.Parse(nil, nil, []string{"read_file(keys/**)"}) }, nil},
+		{"ask, no approver", func() (*permissions.Rules, error) { return permissions.Parse(nil, []string{"read_file(keys/**)"}, nil) }, nil},
+		{"ask, human denies", func() (*permissions.Rules, error) { return permissions.Parse(nil, []string{"read_file(keys/**)"}, nil) }, func() Approver { return &denyAll{} }},
+	}
+	for _, su := range setups {
+		for _, c := range calls {
+			t.Run(su.name+"/"+c.tool, func(t *testing.T) {
+				e := repo(t, map[string]string{"keys/creds.h": secret, "src/ok.c": "int ok_fn(void) { return 1; }\n"})
+				var err error
+				if e.Perms, err = su.rules(); err != nil {
+					t.Fatal(err)
+				}
+				var ap Approver
+				if su.approver != nil {
+					ap = su.approver()
+					e.Approver = ap
+				}
+				out, cerr := call(t, NewSet(e), c.tool, c.args)
+				seen := out
+				if cerr != nil {
+					seen += "\n" + cerr.Error()
+				}
+				if strings.Contains(seen, "secret_fn") || strings.Contains(seen, "4242") {
+					t.Fatalf("%s revealed protected content:\n%s", c.tool, seen)
+				}
+				// list_files with an approver attached lists names without
+				// asking (read_file still asks for the content); everywhere
+				// else a protected path must not be discovered.
+				namesOK := c.tool == "list_files" && su.approver != nil
+				if c.discovers && !namesOK && strings.Contains(seen, "keys/") {
+					t.Fatalf("%s revealed a protected path:\n%s", c.tool, seen)
+				}
+				if d, ok := ap.(*denyAll); ok && c.tool == "list_files" && len(d.asked) != 0 {
+					t.Fatalf("list_files prompted the approver: %v", d.asked)
+				}
+				if c.discovers && !strings.Contains(seen, "src/ok.c") {
+					t.Fatalf("%s hid an unprotected file:\n%s", c.tool, seen)
+				}
+				got, _ := os.ReadFile(filepath.Join(e.Jail.Root, "keys/creds.h"))
+				if string(got) != secret {
+					t.Fatalf("%s modified a file it may not read", c.tool)
+				}
+			})
+		}
+	}
+	// With a human approving the ask, the content tools work as before.
+	for _, c := range calls[:4] {
+		t.Run("ask, human approves/"+c.tool, func(t *testing.T) {
+			e := repo(t, map[string]string{"keys/creds.h": secret})
+			e.Perms, _ = permissions.Parse(nil, []string{"read_file(keys/**)"}, nil)
+			e.Approver = &approveAll{}
+			out, err := call(t, NewSet(e), c.tool, c.args)
+			if err != nil {
+				t.Fatalf("%s refused after approval: %v", c.tool, err)
+			}
+			if !strings.Contains(out, "secret_fn") && !strings.Contains(out, "keys/creds.h") {
+				t.Fatalf("%s output after approval:\n%s", c.tool, out)
+			}
+		})
 	}
 }

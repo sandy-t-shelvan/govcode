@@ -36,6 +36,11 @@ func (t *editFile) Run(ctx context.Context, a map[string]any) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// The result (a diff with context lines) and the error hints reveal the
+	// file's content, so read_file rules apply as well as edit_file rules.
+	if err := t.e.authorize("read_file", t.e.Jail.Rel(abs)); err != nil {
+		return "", err
+	}
 	if err := t.e.authorize("edit_file", t.e.Jail.Rel(abs)); err != nil {
 		return "", err
 	}
