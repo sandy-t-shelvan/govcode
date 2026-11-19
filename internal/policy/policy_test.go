@@ -102,3 +102,16 @@ func TestModelOriginValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestSandboxExposeFieldsLoad(t *testing.T) {
+	p := Dev(t.TempDir(), filepath.Join(t.TempDir(), "state"), "alice")
+	p.Sandbox.Expose = []string{"keys/test/**"}
+	p.Sandbox.ExposeGit = true
+	got, _, err := Load(write(t, p))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Sandbox.Expose) != 1 || got.Sandbox.Expose[0] != "keys/test/**" || !got.Sandbox.ExposeGit {
+		t.Fatalf("sandbox = %+v", got.Sandbox)
+	}
+}

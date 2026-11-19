@@ -1,12 +1,15 @@
 package tools
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sandy-t-shelvan/govcode/internal/marking"
 	"github.com/sandy-t-shelvan/govcode/internal/permissions"
@@ -412,4 +415,220 @@ func TestReadRulesCoverEveryContentTool(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Commands must not read what read_file may not (GOV-47): read-protected
+// worktree files are masked inside the sandbox, and git is hidden so history
+// cannot reveal them either. Exposed paths stay visible to commands only.
+func TestSandboxHidesReadProtectedFiles(t *testing.T) {
+	const secret = "int secret_fn(void) { return 4242; }\n"
+	newEnv := func(t *testing.T) *Env {
+		e := repo(t, map[string]string{"keys/creds.h": secret, "src/ok.c": "int ok_fn(void) { return 1; }\n"})
+		if !e.Runner.Sandboxed() {
+			t.Skip("bubblewrap not available")
+		}
+		return e
+	}
+	run := func(e *Env, c string) ExecResult { return e.Runner.Run(context.Background(), c, 30*time.Second) }
+	deny, _ := permissions.Parse(nil, nil, []string{"read_file(keys/**)"})
+
+	t.Run("deny hides file and git", func(t *testing.T) {
+		e := newEnv(t)
+		e.Runner.HideReadProtected(deny, nil, false)
+		if r := run(e, "cat keys/creds.h"); strings.Contains(r.Output, "4242") || r.HiddenPaths != 1 {
+			t.Fatalf("cat of a read-denied file: hidden=%d\n%s", r.HiddenPaths, r.Output)
+		}
+		if r := run(e, "cat src/ok.c"); r.ExitCode != 0 || !strings.Contains(r.Output, "ok_fn") {
+			t.Fatalf("unprotected file not readable: %+v", r)
+		}
+		for _, c := range []string{"git show HEAD:keys/creds.h", "git log --all -p", "cat .git/HEAD"} {
+			if r := run(e, c); strings.Contains(r.Output, "4242") || strings.Contains(r.Output, "refs/heads") {
+				t.Fatalf("%q reached git data:\n%s", c, r.Output)
+			}
+		}
+		if r := run(e, "echo x > keys/creds.h"); r.ExitCode == 0 {
+			t.Fatal("a command overwrote a read-denied file")
+		}
+	})
+
+	// govcode runs commands in a linked worktree: .git there is a file and
+	// the object store is the main repository's (bound separately).
+	t.Run("linked worktree hides file and git", func(t *testing.T) {
+		e := newEnv(t)
+		wt := filepath.Join(t.TempDir(), "wt")
+		if out, err := exec.Command("git", "-C", e.Jail.Root, "worktree", "add", "-q", "--detach", wt).CombinedOutput(); err != nil {
+			t.Fatalf("worktree add: %s", out)
+		}
+		r, err := NewRunner(SandboxBestEffort, wt, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.HideReadProtected(deny, nil, false)
+		for _, c := range []string{"cat keys/creds.h", "git show HEAD:keys/creds.h", "git log --all -p"} {
+			if res := r.Run(context.Background(), c, 30*time.Second); strings.Contains(res.Output, "4242") {
+				t.Fatalf("%q in a linked worktree revealed protected content:\n%s", c, res.Output)
+			}
+		}
+		if res := r.Run(context.Background(), "cat src/ok.c", 30*time.Second); !strings.Contains(res.Output, "ok_fn") {
+			t.Fatalf("unprotected file in linked worktree: %+v", res)
+		}
+	})
+
+	t.Run("ask counts as hidden", func(t *testing.T) {
+		e := newEnv(t)
+		ask, _ := permissions.Parse(nil, []string{"read_file(keys/**)"}, nil)
+		e.Runner.HideReadProtected(ask, nil, false)
+		if r := run(e, "cat keys/creds.h"); strings.Contains(r.Output, "4242") {
+			t.Fatalf("ask-protected file readable by a command:\n%s", r.Output)
+		}
+	})
+
+	t.Run("history of a deleted protected file stays hidden", func(t *testing.T) {
+		e := newEnv(t)
+		for _, a := range [][]string{{"rm", "-q", "keys/creds.h"}, {"-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "rm"}} {
+			if out, err := exec.Command("git", append([]string{"-C", e.Jail.Root}, a...)...).CombinedOutput(); err != nil {
+				t.Fatalf("git %v: %s", a, out)
+			}
+		}
+		e.Runner.HideReadProtected(deny, nil, false)
+		if r := run(e, "git log --all -p"); strings.Contains(r.Output, "4242") {
+			t.Fatalf("git history revealed a deleted protected file:\n%s", r.Output)
+		}
+	})
+
+	t.Run("expose keeps paths visible to commands only", func(t *testing.T) {
+		e := newEnv(t)
+		e.Perms = deny
+		e.Runner.HideReadProtected(deny, []string{"keys/**"}, true)
+		if r := run(e, "cat keys/creds.h"); !strings.Contains(r.Output, "4242") || r.HiddenPaths != 0 {
+			t.Fatalf("exposed file hidden: %+v", r)
+		}
+		if r := run(e, "git show HEAD:keys/creds.h"); !strings.Contains(r.Output, "4242") {
+			t.Fatalf("expose_git did not expose git:\n%s", r.Output)
+		}
+		if _, err := call(t, NewSet(e), "read_file", map[string]any{"path": "keys/creds.h"}); err == nil {
+			t.Fatal("expose changed what read_file allows")
+		}
+	})
+
+	t.Run("no read rules changes nothing", func(t *testing.T) {
+		e := newEnv(t)
+		none, _ := permissions.Parse(nil, nil, []string{"edit_file(keys/**)"})
+		e.Runner.HideReadProtected(none, nil, false)
+		if e.Runner.Hide != nil || e.Runner.HideGit {
+			t.Fatal("hiding enabled without read rules")
+		}
+		if r := run(e, "git show HEAD:keys/creds.h"); !strings.Contains(r.Output, "4242") {
+			t.Fatalf("git unexpectedly hidden:\n%s", r.Output)
+		}
+	})
+}
+
+// Without bubblewrap nothing can be hidden, so best-effort refuses commands
+// while read rules protect files; with no rules, or in mode off, they run.
+func TestNoSandboxRefusesWhenFilesAreProtected(t *testing.T) {
+	e := repo(t, map[string]string{"keys/creds.h": "x 4242\n", "a.c": "int a;\n"})
+	deny, _ := permissions.Parse(nil, nil, []string{"read_file(keys/**)"})
+	r := &Runner{Mode: SandboxBestEffort, Worktree: e.Jail.Root, MaxOutput: 30000, shell: "/bin/sh"}
+	if res := r.Run(context.Background(), "cat a.c", 10*time.Second); res.ExitCode != 0 {
+		t.Fatalf("no rules: %+v", res)
+	}
+	r.HideReadProtected(deny, nil, false)
+	res := r.Run(context.Background(), "cat keys/creds.h", 10*time.Second)
+	if res.ExitCode == 0 || strings.Contains(res.Output, "4242") || !strings.Contains(res.Output, "refused") {
+		t.Fatalf("best-effort without bubblewrap ran a command over protected files: %+v", res)
+	}
+	r.Mode = SandboxOff
+	if res := r.Run(context.Background(), "cat a.c", 10*time.Second); res.ExitCode != 0 {
+		t.Fatalf("mode off refused: %+v", res)
+	}
+}
+
+// Thousands of masks must not exceed the kernel's argument-size limit
+// (ARG_MAX, 2 MiB): bubblewrap options are passed through a file descriptor.
+func TestSandboxManyMasksFitArgLimit(t *testing.T) {
+	long := strings.Repeat("d", 200)
+	files := map[string]string{"ok.c": "int ok;\n"}
+	for i := 0; i < 8000; i++ {
+		files[fmt.Sprintf("big/%s/f%05d.c", long, i)] = "int x;\n"
+	}
+	e := repo(t, files)
+	if !e.Runner.Sandboxed() {
+		t.Skip("bubblewrap not available")
+	}
+	deny, _ := permissions.Parse(nil, nil, []string{"read_file(big/**)"})
+	e.Runner.HideReadProtected(deny, nil, false)
+	r := e.Runner.Run(context.Background(), "cat ok.c", 60*time.Second)
+	if r.ExitCode != 0 || r.HiddenPaths != 8000 || !strings.Contains(r.Output, "int ok") {
+		t.Fatalf("exit=%d hidden=%d output=%q", r.ExitCode, r.HiddenPaths, r.Output)
+	}
+}
+
+// Edge cases of masking: what collapses to a whole-directory mask, what stays
+// per-file, and that too many scattered masks end in govcode's own refusal.
+func TestSandboxMaskShapes(t *testing.T) {
+	run := func(e *Env, c string) ExecResult { return e.Runner.Run(context.Background(), c, 60*time.Second) }
+	sandboxed := func(t *testing.T, e *Env) {
+		if !e.Runner.Sandboxed() {
+			t.Skip("bubblewrap not available")
+		}
+	}
+	t.Run("whole protected directory hides names and refuses writes", func(t *testing.T) {
+		e := repo(t, map[string]string{"keys/a.h": "4242\n", "keys/sub/b.h": "4242\n", "ok.c": "int ok;\n"})
+		sandboxed(t, e)
+		deny, _ := permissions.Parse(nil, nil, []string{"read_file(keys/**)"})
+		e.Runner.HideReadProtected(deny, nil, false)
+		if r := run(e, "ls -A keys"); strings.TrimSpace(r.Output) != "" || r.HiddenPaths != 2 {
+			t.Fatalf("collapsed directory listing: hidden=%d %q", r.HiddenPaths, r.Output)
+		}
+		if r := run(e, "echo x > keys/new.h"); r.ExitCode == 0 {
+			t.Fatal("a command wrote into a protected directory")
+		}
+	})
+	t.Run("pattern that does not cover the directory keeps it writable", func(t *testing.T) {
+		e := repo(t, map[string]string{"certs/a.pem": "4242\n", "ok.c": "int ok;\n"})
+		sandboxed(t, e)
+		deny, _ := permissions.Parse(nil, nil, []string{"read_file(**/*.pem)"})
+		e.Runner.HideReadProtected(deny, nil, false)
+		if r := run(e, "cat certs/a.pem"); strings.Contains(r.Output, "4242") {
+			t.Fatalf("protected .pem readable:\n%s", r.Output)
+		}
+		if r := run(e, "echo x > certs/new.crt && ls certs"); r.ExitCode != 0 || !strings.Contains(r.Output, "a.pem") {
+			t.Fatalf("certs/ was masked whole: %+v", r)
+		}
+	})
+	t.Run("partly protected directory keeps the rest", func(t *testing.T) {
+		e := repo(t, map[string]string{"keys/a.h": "4242\n", "keys/README": "public\n"})
+		sandboxed(t, e)
+		deny, _ := permissions.Parse(nil, nil, []string{"read_file(keys/*.h)"})
+		e.Runner.HideReadProtected(deny, nil, false)
+		r := run(e, "cat keys/a.h; cat keys/README; echo y > keys/new.txt && echo wrote")
+		if strings.Contains(r.Output, "4242") || !strings.Contains(r.Output, "public") || !strings.Contains(r.Output, "wrote") {
+			t.Fatalf("partly protected directory: %+v", r)
+		}
+	})
+	t.Run("too many scattered masks are refused by govcode", func(t *testing.T) {
+		files := map[string]string{}
+		for i := 0; i < 3000; i++ {
+			files[fmt.Sprintf("d%04d/k.pem", i)] = "4242\n"
+			files[fmt.Sprintf("d%04d/ok.c", i)] = "int ok;\n"
+		}
+		e := repo(t, files)
+		sandboxed(t, e)
+		deny, _ := permissions.Parse(nil, nil, []string{"read_file(**/*.pem)"})
+		e.Runner.HideReadProtected(deny, nil, false)
+		if r := run(e, "true"); r.ExitCode == 0 || !strings.Contains(r.Output, "separately protected files") {
+			t.Fatalf("scattered masks: %+v", r)
+		}
+	})
+	t.Run("the options file is not readable inside the sandbox", func(t *testing.T) {
+		e := repo(t, map[string]string{"keys/creds.h": "4242\n", "ok.c": "int ok;\n"})
+		sandboxed(t, e)
+		deny, _ := permissions.Parse(nil, nil, []string{"read_file(keys/*.h)"})
+		e.Runner.HideReadProtected(deny, nil, false)
+		r := run(e, "for f in /proc/self/fd/*; do case $f in */0|*/1|*/2) ;; *) cat $f 2>/dev/null;; esac; done | tr '\\0' '\\n'")
+		if strings.Contains(r.Output, "creds.h") || strings.Contains(r.Output, "--ro-bind") {
+			t.Fatalf("sandbox options (and protected paths) readable from a descriptor:\n%s", r.Output)
+		}
+	})
 }

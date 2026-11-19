@@ -21,6 +21,7 @@ import (
 	"github.com/sandy-t-shelvan/govcode/internal/proposal"
 	"github.com/sandy-t-shelvan/govcode/internal/sign"
 	"github.com/sandy-t-shelvan/govcode/internal/supply"
+	"github.com/sandy-t-shelvan/govcode/internal/tools"
 )
 
 // world builds a repo, a SECRET-level dev policy, a registered key, and
@@ -518,5 +519,50 @@ func TestOpenDoesNotSwapAnUnopenableRepo(t *testing.T) {
 	os.Chdir(filepath.Join(other, "sub"))
 	if _, _, err := Open(pol, io.Discard, true); err == nil || !strings.Contains(err.Error(), "grants access only to") {
 		t.Fatalf("unopenable repo: err = %v, want a refusal", err)
+	}
+}
+
+// A real run wires read rules into the command sandbox (GOV-47): with
+// read_file(keys/**) denied, `cat` and `git show` through run_command must not
+// hand the protected file to the model.
+func TestRunHidesReadProtectedFilesFromCommands(t *testing.T) {
+	a, _, err := openWorld(t, func(p *policy.Policy) {
+		p.Permissions.Deny = append(p.Permissions.Deny, "read_file(keys/**)")
+		p.Permissions.Allow = append(p.Permissions.Allow, "run_command(cat *)", "run_command(git show *)")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	probe, perr := tools.NewRunner(tools.SandboxBestEffort, a.Repo.Root, nil, nil)
+	if perr != nil || !probe.Sandboxed() {
+		t.Skip("bubblewrap not available")
+	}
+	root := a.Repo.Root
+	os.MkdirAll(filepath.Join(root, "keys"), 0o755)
+	os.WriteFile(filepath.Join(root, "keys", "creds.h"), []byte("int secret = 4242;\n"), 0o644)
+	for _, g := range [][]string{{"add", "-A"}, {"-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "keys"}} {
+		if out, err := exec.Command("git", append([]string{"-C", root}, g...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %s", g, out)
+		}
+	}
+	cmd := func(c string) llm.Response {
+		args, _ := json.Marshal(map[string]any{"command": c})
+		return llm.Response{ToolCalls: []llm.ToolCall{{Name: "run_command", Args: args, Source: llm.SourceNative}}}
+	}
+	be := &llm.Scripted{Responses: []llm.Response{
+		cmd("cat keys/creds.h"),
+		cmd("git show HEAD:keys/creds.h"),
+		{ToolCalls: []llm.ToolCall{{Name: "finish", Args: json.RawMessage(`{"summary":"looked"}`), Source: llm.SourceNative}}},
+	}}
+	if _, err := a.Run(context.Background(), RunOptions{Task: "look at the keys", Backend: be}); err != nil && !strings.Contains(err.Error(), "no changes") {
+		t.Logf("run: %v", err)
+	}
+	if len(be.Seen) < 3 {
+		t.Fatalf("model saw %d turns", len(be.Seen))
+	}
+	for _, m := range be.Seen[len(be.Seen)-1] {
+		if strings.Contains(m.Content, "4242") {
+			t.Fatalf("a command returned protected content to the model:\n%s", m.Content)
+		}
 	}
 }

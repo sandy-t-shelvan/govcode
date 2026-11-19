@@ -96,7 +96,7 @@ install -m 644 /media/xfer/release.pub /media/xfer/models.pub /etc/govcode/trust
 cp -r /media/xfer/models/. /opt/govcode/models/ && chmod -R a-w /opt/govcode/models
 ```
 
-System dependencies (listed in the SBOM): `git` ≥ 2.38, `bubblewrap`, `bash`, the model server, and your compilers (gcc/g++, GNAT, GnuCOBOL, gfortran). bubblewrap needs unprivileged user namespaces (`sysctl kernel.unprivileged_userns_clone=1` on Debian-family systems; on RHEL check `user.max_user_namespaces`).
+System dependencies (listed in the SBOM): `git` ≥ 2.38, `bubblewrap`, `bash`, the model server, and your compilers (gcc/g++, GNAT, GnuCOBOL, gfortran). bubblewrap needs unprivileged user namespaces (`sysctl kernel.unprivileged_userns_clone=1` on Debian-family systems; on RHEL check `user.max_user_namespaces`). If the policy has `read_file` deny or ask rules, bubblewrap must also support `--args` and `--remount-ro`, which govcode uses to hide protected files from commands (SECURITY.md §2a). It checks this at start; on a bubblewrap without them, commands are refused rather than run with protected files visible. On the site host, confirm with `bwrap --help | grep -E -- '--args|--remount-ro'`.
 
 ## 3. Model server (Ollama, loopback only)
 

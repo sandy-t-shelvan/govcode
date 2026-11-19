@@ -73,6 +73,14 @@ type Sandbox struct {
 	Mode         string   `json:"mode"` // required | best-effort | off
 	ExtraROPaths []string `json:"extra_ro_paths"`
 	Env          []string `json:"env"`
+	// Files that read_file rules deny or ask for are hidden from commands
+	// (masked to empty), and git is hidden whenever any read_file rule
+	// exists. Expose lists repo-relative globs kept visible to commands
+	// anyway (e.g. test keys a build needs); it does not change read_file.
+	Expose []string `json:"expose,omitempty"`
+	// ExposeGit keeps the repository's git data visible to commands even
+	// though read rules exist. git history then reveals protected files.
+	ExposeGit bool `json:"expose_git,omitempty"`
 }
 
 type Trust struct {
