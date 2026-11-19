@@ -32,7 +32,7 @@
 - `ask` needs a human at the terminal or in the editor. With no human attached (`--non-interactive`, CI), ask becomes deny. Every decision is audit-logged with the rule that matched.
 
 ### 2b. Spillage guard (classification above the repository's level)
-- The policy's `classification` sets the ceiling (for example `SECRET//NOFORN` means SECRET). The guard recognises banner markings (`TOP SECRET//SI`), banner lines, `Classification:` headers and portion marks at the start of a line (`(TS//SI) …`). It matches upper case only, so code such as `SECRET_KEY` or `if (S)` does not trigger.
+- The policy's `classification` sets the ceiling (for example `SECRET//NOFORN` means SECRET). The guard recognises banner markings (`TOP SECRET//SI`), banner lines, `Classification:` headers and portion marks at the start of a line (`(TS//SI) …`). It matches upper case only, so code such as `SECRET_KEY` or `if (S)` does not trigger. Inside a unified-diff hunk the leading `+`, `-` or space is ignored, so a banner line or portion mark is still recognised in an edit diff or in `git diff` output.
 - Anything marked above the ceiling is stopped wherever it appears:
 
   | Where | What happens |
@@ -42,7 +42,7 @@
   | `search` output | Matching lines withheld |
   | Command and test output | Withheld |
   | Model output | Not recorded verbatim |
-  | Edits and new files | Refused |
+  | Edits and new files | New text above the ceiling is refused. The diff of an accepted edit is withheld when a hunk line is still marked |
   | Proposal's added lines | Proposal marked `blocked` |
 - Each event is audit-logged with location and level only, never the content. `spillage_guard` cannot be disabled in strict mode.
 - This is a technical backstop, not a replacement for your spillage procedure. Follow your ISSM's procedure when an event fires.

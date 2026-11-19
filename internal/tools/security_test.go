@@ -3,6 +3,8 @@ package tools
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -251,6 +253,55 @@ func TestSearchSpillageIgnoresLineNumberPrefix(t *testing.T) {
 	}
 	if !strings.Contains(out, "withheld") || !strings.Contains(out, "portion.txt:2:// (S) allowed in this repo") {
 		t.Fatalf("search dropped a permitted line or the withhold notice:\n%s", out)
+	}
+}
+
+// read_file withholds a file that carries a banner, and search returns the
+// unmarked line next to it. Editing that line runs git diff -U2, whose
+// context contains the banner. The diff is tool output, so it has to be
+// withheld too. A portion mark removed by the edit is a diff deletion
+// ("-(TS) …"); the leading '-' must not hide it, including from a later
+// allowlisted `git diff`.
+func TestEditDiffDoesNotLeakMarkings(t *testing.T) {
+	e := repo(t, map[string]string{"doc.c": "TOP SECRET\nint mode = 3;\n"})
+	e.MaxLevel = marking.S
+	s := NewSet(e)
+	found, err := call(t, s, "search", map[string]any{"pattern": "mode"})
+	if err != nil || strings.Contains(found, "TOP SECRET") || !strings.Contains(found, "doc.c:2:int mode = 3;") {
+		t.Fatalf("search of the unmarked line: %v\n%s", err, found)
+	}
+	out, err := call(t, s, "edit_file", map[string]any{"path": "doc.c", "old_text": "int mode = 3;", "new_text": "int mode = 4;"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "TOP SECRET") || !strings.Contains(out, "Edited") || !strings.Contains(out, "withheld") {
+		t.Fatalf("edit diff leaked or was not withheld:\n%s", out)
+	}
+	body, _ := os.ReadFile(filepath.Join(e.Jail.Root, "doc.c"))
+	if !strings.Contains(string(body), "int mode = 4;") || !strings.Contains(string(body), "TOP SECRET") {
+		t.Fatalf("edit did not apply:\n%s", body)
+	}
+
+	clean := repo(t, map[string]string{"ok.c": "int mode = 3;\n"})
+	clean.MaxLevel = marking.S
+	out, err = call(t, NewSet(clean), "edit_file", map[string]any{"path": "ok.c", "old_text": "int mode = 3;", "new_text": "int mode = 4;"})
+	if err != nil || strings.Contains(out, "withheld") || !strings.Contains(out, "int mode = 4") {
+		t.Fatalf("clean edit diff: %v\n%s", err, out)
+	}
+
+	e = repo(t, map[string]string{"portion.c": "(TS) payload coordinates\nint mode = 3;\n"})
+	e.MaxLevel = marking.S
+	e.Allowlist = []string{"git diff"}
+	s = NewSet(e)
+	out, err = call(t, s, "edit_file", map[string]any{
+		"path": "portion.c", "old_text": "(TS) payload coordinates", "new_text": "// (S) allowed in this repo",
+	})
+	if err != nil || strings.Contains(out, "payload") || strings.Contains(out, "(TS)") || !strings.Contains(out, "withheld") {
+		t.Fatalf("deleted portion mark returned to the model: %v\n%s", err, out)
+	}
+	out, err = call(t, s, "run_command", map[string]any{"command": "git diff"})
+	if err != nil || strings.Contains(out, "payload") || strings.Contains(out, "(TS)") || !strings.Contains(out, "withheld") {
+		t.Fatalf("git diff returned the deleted portion mark: %v\n%s", err, out)
 	}
 }
 
