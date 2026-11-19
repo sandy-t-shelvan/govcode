@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -165,17 +166,36 @@ func VerifyArtifacts(m *Model, dir string, progress func(string)) []Problem {
 // directly (vLLM loads safetensors from dir/weights/<model id>/). If that
 // directory is absent nothing is checked: GGUF-only stagings do not carry
 // upstream weights. If it is present, every upstream file in the lock must be
-// there and match, so a server never loads an unpinned shard or config.
+// there and match, and nothing else may be: vLLM picks up weight files in
+// that directory by pattern, so an extra shard would be loaded unpinned.
 func VerifyUpstream(m *Model, dir string, progress func(string)) []Problem {
 	sub := filepath.Join(dir, "weights", m.ID)
 	if fi, err := os.Stat(sub); err != nil || !fi.IsDir() {
 		return nil
 	}
 	var probs []Problem
+	pinned := map[string]bool{}
 	for _, f := range m.Upstream.Files {
+		pinned[filepath.Clean(f.Path)] = true
 		f.Path = filepath.Join(m.ID, f.Path)
 		ext := strings.ToLower(filepath.Ext(f.Path))
 		probs = append(probs, verifyFile(dir, f, ext == ".safetensors" || ext == ".gguf", progress)...)
+	}
+	err := filepath.WalkDir(sub, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		rel, _ := filepath.Rel(sub, p)
+		if !pinned[rel] {
+			probs = append(probs, Problem{p, "file is not in the lock (unpinned files must not be staged next to served weights)"})
+		}
+		return nil
+	})
+	if err != nil {
+		probs = append(probs, Problem{sub, err.Error()})
 	}
 	return probs
 }

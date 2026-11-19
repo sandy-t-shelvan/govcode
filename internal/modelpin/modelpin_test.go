@@ -75,6 +75,19 @@ func TestVerifyUpstream(t *testing.T) {
 	if p := VerifyUpstream(m, dir, nil); len(p) != 1 {
 		t.Fatalf("tampered config: %v", p)
 	}
+	os.WriteFile(filepath.Join(sub, "config.json"), []byte(`{"a":1}`), 0o644)
+	// An unpinned shard next to the pinned ones (vLLM would load it).
+	os.WriteFile(filepath.Join(sub, "consolidated.safetensors"), st, 0o644)
+	if p := VerifyUpstream(m, dir, nil); len(p) != 1 {
+		t.Fatalf("unpinned extra file: %v", p)
+	}
+	os.Remove(filepath.Join(sub, "consolidated.safetensors"))
+	os.MkdirAll(filepath.Join(sub, "nested"), 0o755)
+	os.WriteFile(filepath.Join(sub, "nested", "x.safetensors"), st, 0o644)
+	if p := VerifyUpstream(m, dir, nil); len(p) != 1 {
+		t.Fatalf("unpinned nested file: %v", p)
+	}
+	os.RemoveAll(filepath.Join(sub, "nested"))
 	os.Remove(filepath.Join(sub, "config.json"))
 	if p := VerifyUpstream(m, dir, nil); len(p) != 1 {
 		t.Fatal("missing upstream file passed")
