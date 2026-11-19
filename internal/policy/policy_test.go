@@ -115,3 +115,27 @@ func TestSandboxExposeFieldsLoad(t *testing.T) {
 		t.Fatalf("sandbox = %+v", got.Sandbox)
 	}
 }
+
+// The shipped example policy must parse with the strict decoder (unknown
+// fields are rejected), so a typo or a removed field is caught here.
+func TestExamplePolicyDecodesStrictly(t *testing.T) {
+	f, err := os.Open("../../deploy/policy.example.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	dec := json.NewDecoder(f)
+	dec.DisallowUnknownFields()
+	var p Policy
+	if err := dec.Decode(&p); err != nil {
+		t.Fatalf("deploy/policy.example.json: %v", err)
+	}
+	if p.Sandbox.ExposeGit || len(p.Sandbox.Expose) != 0 {
+		t.Fatalf("example policy should not expose anything by default: %+v", p.Sandbox)
+	}
+	for _, r := range p.Permissions.Ask {
+		if strings.HasPrefix(r, "run_command(git") {
+			t.Fatalf("example still asks for %s, which cannot work while git is hidden", r)
+		}
+	}
+}

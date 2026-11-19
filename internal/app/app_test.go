@@ -566,3 +566,58 @@ func TestRunHidesReadProtectedFilesFromCommands(t *testing.T) {
 		}
 	}
 }
+
+// Analyzers and site checks run in the sandbox, so they cannot see a file the
+// read rules hide. A change to such a file must block, not pass unchecked.
+func TestChangeToHiddenFileBlocksChecks(t *testing.T) {
+	a, _, err := openWorld(t, func(p *policy.Policy) {
+		p.Permissions.Deny = append(p.Permissions.Deny, "read_file(keys/**)")
+		p.Analysis.Required = true
+		p.Analysis.Analyzers = []analysis.Analyzer{{Name: "true", Extensions: []string{".h", ".c"}, Command: "true"}}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	probe, _ := tools.NewRunner(tools.SandboxBestEffort, a.Repo.Root, nil, nil)
+	if probe == nil || !probe.Sandboxed() {
+		t.Skip("bubblewrap not available")
+	}
+	create, _ := json.Marshal(map[string]any{"path": "keys/new.h", "content": "int planted;\n"})
+	be := &llm.Scripted{Responses: []llm.Response{
+		{ToolCalls: []llm.ToolCall{{Name: "create_file", Args: create, Source: llm.SourceNative}}},
+		{ToolCalls: []llm.ToolCall{{Name: "run_tests", Args: json.RawMessage(`{}`), Source: llm.SourceNative}}},
+		{ToolCalls: []llm.ToolCall{{Name: "finish", Args: json.RawMessage(`{"summary":"added"}`), Source: llm.SourceNative}}},
+	}}
+	p, err := a.Run(context.Background(), RunOptions{Task: "add a header", Backend: be})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Status != proposal.StatusBlocked || !strings.Contains(strings.Join(p.Blocked, "\n"), "checks cannot see keys/new.h") {
+		t.Fatalf("status=%s blocked=%v", p.Status, p.Blocked)
+	}
+}
+
+// verify reports whether protected files can be hidden from commands, so a
+// site finds a too-old bubblewrap at acceptance rather than at first use.
+func TestPreflightReportsSandboxHiding(t *testing.T) {
+	_, checks, err := openWorld(t, func(p *policy.Policy) {
+		p.Permissions.Deny = append(p.Permissions.Deny, "read_file(keys/**)")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	probe, _ := tools.NewRunner(tools.SandboxBestEffort, t.TempDir(), nil, nil)
+	want := "FAIL"
+	if probe != nil && probe.CanHide() {
+		want = "PASS"
+	}
+	for _, c := range checks {
+		if c.Name == "sandbox hiding" {
+			if c.Status != want {
+				t.Fatalf("sandbox hiding = %s, want %s (%s)", c.Status, want, c.Detail)
+			}
+			return
+		}
+	}
+	t.Fatal("no sandbox hiding check with read rules in the policy")
+}

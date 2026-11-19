@@ -75,6 +75,10 @@ func NewRunner(mode, worktree string, extraRO, env []string) (*Runner, error) {
 	return r, nil
 }
 
+// CanHide reports whether this runner can hide files from commands
+// (bubblewrap with --args and --remount-ro).
+func (r *Runner) CanHide() bool { return r.bwrap != "" && r.maskOK }
+
 // Sandboxed reports whether commands run under bubblewrap.
 func (r *Runner) Sandboxed() bool { return r.bwrap != "" }
 
@@ -123,6 +127,17 @@ func (r *Runner) RunWith(ctx context.Context, command string, timeout time.Durat
 		for _, p := range append(append([]string{}, defaultRO...), r.ExtraRO...) {
 			if _, err := os.Stat(p); err == nil {
 				args = append(args, "--ro-bind", p, p)
+			}
+		}
+		// The read-only system binds (/opt, extra_ro_paths) could contain the
+		// main repository or its git dir, where nothing is masked. While
+		// hiding, cover those with an empty tmpfs; the worktree bind below
+		// still applies on top.
+		if plan.count > 0 || r.HideGit {
+			for _, p := range r.repoPaths() {
+				if SandboxVisible(p, r.ExtraRO) {
+					args = append(args, "--tmpfs", p)
+				}
 			}
 		}
 		// Linked worktrees reference the main repository's git dir; expose it
@@ -194,7 +209,7 @@ func (r *Runner) RunWith(ctx context.Context, command string, timeout time.Durat
 		res.ExitCode = -1
 		buf.WriteString("\n[govcode: " + err.Error() + "]")
 	}
-	res.Output = headTail(buf.String(), r.MaxOutput)
+	res.Output = headTail(scrubSetupError(buf.String(), sandbox == "bubblewrap" && hiding), r.MaxOutput)
 	return res
 }
 
@@ -292,6 +307,35 @@ func probeMasking(bwrap string) bool {
 	cmd := exec.Command(bwrap, "--args", "3", "--", "true")
 	cmd.ExtraFiles = []*os.File{f}
 	return cmd.Run() == nil
+}
+
+// scrubSetupError replaces bubblewrap's own failure message while files are
+// hidden: it can name a protected path (for example "bwrap: Can't mount
+// tmpfs on .../keys"), and those names are withheld from the model.
+func scrubSetupError(out string, hiding bool) string {
+	if hiding && strings.HasPrefix(out, "bwrap: ") {
+		return "[govcode: the sandbox could not be set up; bubblewrap's message is withheld because it can name protected files]"
+	}
+	return out
+}
+
+// repoPaths are the main repository's root and git directory, other than the
+// worktree itself.
+func (r *Runner) repoPaths() []string {
+	gd := gitCommonDir(r.Worktree)
+	if gd == "" {
+		return nil
+	}
+	var out []string
+	if filepath.Base(gd) == ".git" {
+		if root := filepath.Dir(gd); root != r.Worktree {
+			out = append(out, root)
+		}
+	}
+	if filepath.Dir(gd) != r.Worktree {
+		out = append(out, gd)
+	}
+	return out
 }
 
 // bwrapArgsFile writes NUL-separated bubblewrap options to an unlinked

@@ -474,6 +474,30 @@ func TestSandboxHidesReadProtectedFiles(t *testing.T) {
 		}
 	})
 
+	// The main repository may sit under a read-only bind (/opt, or an
+	// extra_ro_paths entry), where nothing is masked: it must be covered.
+	t.Run("main repository under a read-only bind stays hidden", func(t *testing.T) {
+		e := newEnv(t)
+		wt := filepath.Join(t.TempDir(), "wt")
+		if out, err := exec.Command("git", "-C", e.Jail.Root, "worktree", "add", "-q", "--detach", wt).CombinedOutput(); err != nil {
+			t.Fatalf("worktree add: %s", out)
+		}
+		r, err := NewRunner(SandboxBestEffort, wt, []string{e.Jail.Root}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.HideReadProtected(deny, nil, false)
+		main := e.Jail.Root
+		for _, c := range []string{"cat " + main + "/keys/creds.h", "git --git-dir=" + main + "/.git show HEAD:keys/creds.h", "cat " + main + "/.git/HEAD"} {
+			if res := r.Run(context.Background(), c, 30*time.Second); strings.Contains(res.Output, "4242") || strings.Contains(res.Output, "refs/heads") {
+				t.Fatalf("%q through a read-only bind:\n%s", c, res.Output)
+			}
+		}
+		if res := r.Run(context.Background(), "cat src/ok.c", 30*time.Second); !strings.Contains(res.Output, "ok_fn") {
+			t.Fatalf("worktree hidden along with the main repository: %+v", res)
+		}
+	})
+
 	t.Run("ask counts as hidden", func(t *testing.T) {
 		e := newEnv(t)
 		ask, _ := permissions.Parse(nil, []string{"read_file(keys/**)"}, nil)
@@ -631,4 +655,17 @@ func TestSandboxMaskShapes(t *testing.T) {
 			t.Fatalf("sandbox options (and protected paths) readable from a descriptor:\n%s", r.Output)
 		}
 	})
+}
+
+func TestScrubSetupError(t *testing.T) {
+	msg := "bwrap: Can't mount tmpfs on /work/keys/secret-dir: No such file\n"
+	if got := scrubSetupError(msg, true); strings.Contains(got, "secret-dir") || !strings.Contains(got, "withheld") {
+		t.Fatalf("hiding: %q", got)
+	}
+	if got := scrubSetupError(msg, false); got != msg {
+		t.Fatalf("not hiding: %q", got)
+	}
+	if out := "build ok\nbwrap: not at start\n"; scrubSetupError(out, true) != out {
+		t.Fatal("command output that merely mentions bwrap was replaced")
+	}
 }

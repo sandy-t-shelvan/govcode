@@ -273,10 +273,20 @@ func Open(policyPath string, out io.Writer, needSigner bool) (*App, []Check, err
 	a.checkHost(add)
 
 	// Sandbox availability
-	if _, err := tools.NewRunner(p.Sandbox.Mode, repo.Root, p.Sandbox.ExtraROPaths, p.Sandbox.Env); err != nil {
+	if r, err := tools.NewRunner(p.Sandbox.Mode, repo.Root, p.Sandbox.ExtraROPaths, p.Sandbox.Env); err != nil {
 		add("sandbox", "FAIL", err.Error())
 	} else {
 		add("sandbox", "PASS", "mode="+p.Sandbox.Mode)
+		// With read rules, commands must have protected files hidden from
+		// them; without a capable bubblewrap every command is refused.
+		if rules, rerr := p.Rules(); rerr == nil && rules.Restricts("read_file") && p.Sandbox.Mode != tools.SandboxOff {
+			if r.CanHide() {
+				add("sandbox hiding", "PASS", "read-protected files and git are hidden from commands")
+			} else {
+				add("sandbox hiding", "FAIL", "read rules exist but this host cannot hide protected files from commands "+
+					"(needs bubblewrap with user namespaces, --args and --remount-ro); every command would be refused")
+			}
+		}
 	}
 
 	// git >= 2.38 for merge-tree --write-tree

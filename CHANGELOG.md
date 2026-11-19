@@ -9,7 +9,8 @@
 - With read rules in the policy, git commands inside the sandbox fail unless `sandbox.expose_git: true`. The example policy no longer lists `run_command(git *)`.
 - In `best-effort` sandbox mode without bubblewrap, commands are refused while read rules protect files.
 - A directory the read rules protect as a whole (for example `keys/**`) appears empty and read-only to commands. Builds that write into such a directory need it in `sandbox.expose`.
-- Hiding needs a bubblewrap with `--args` and `--remount-ro`; with an older one, commands are refused while read rules exist.
+- Hiding needs a bubblewrap with `--args` and `--remount-ro`; with an older one, commands are refused while read rules exist. `govcode verify` reports it as `sandbox hiding`.
+- A proposal that changes a file read rules hide is `blocked` when the policy has analyzers or pre-proposal checks, since they run in the sandbox and cannot see it.
 
 ## 0.3.0 (2026-11-19)
 
