@@ -21,6 +21,7 @@ import (
 	"github.com/sandy-t-shelvan/govcode/internal/proposal"
 	"github.com/sandy-t-shelvan/govcode/internal/sign"
 	"github.com/sandy-t-shelvan/govcode/internal/supply"
+	"github.com/sandy-t-shelvan/govcode/internal/tools"
 )
 
 // world builds a repo, a SECRET-level dev policy, a registered key, and
@@ -519,4 +520,115 @@ func TestOpenDoesNotSwapAnUnopenableRepo(t *testing.T) {
 	if _, _, err := Open(pol, io.Discard, true); err == nil || !strings.Contains(err.Error(), "grants access only to") {
 		t.Fatalf("unopenable repo: err = %v, want a refusal", err)
 	}
+}
+
+// A real run wires read rules into the command sandbox (GOV-47): with
+// read_file(keys/**) denied, `cat` and `git show` through run_command must not
+// hand the protected file to the model.
+func TestRunHidesReadProtectedFilesFromCommands(t *testing.T) {
+	a, _, err := openWorld(t, func(p *policy.Policy) {
+		p.Permissions.Deny = append(p.Permissions.Deny, "read_file(keys/**)")
+		p.Permissions.Allow = append(p.Permissions.Allow, "run_command(cat *)", "run_command(git show *)")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	probe, perr := tools.NewRunner(tools.SandboxBestEffort, a.Repo.Root, nil, nil)
+	if perr != nil || !probe.Sandboxed() {
+		skipNoBwrap(t)
+	}
+	root := a.Repo.Root
+	os.MkdirAll(filepath.Join(root, "keys"), 0o755)
+	os.WriteFile(filepath.Join(root, "keys", "creds.h"), []byte("int secret = 4242;\n"), 0o644)
+	for _, g := range [][]string{{"add", "-A"}, {"-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "keys"}} {
+		if out, err := exec.Command("git", append([]string{"-C", root}, g...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %s", g, out)
+		}
+	}
+	cmd := func(c string) llm.Response {
+		args, _ := json.Marshal(map[string]any{"command": c})
+		return llm.Response{ToolCalls: []llm.ToolCall{{Name: "run_command", Args: args, Source: llm.SourceNative}}}
+	}
+	be := &llm.Scripted{Responses: []llm.Response{
+		cmd("cat keys/creds.h"),
+		cmd("git show HEAD:keys/creds.h"),
+		{ToolCalls: []llm.ToolCall{{Name: "finish", Args: json.RawMessage(`{"summary":"looked"}`), Source: llm.SourceNative}}},
+	}}
+	if _, err := a.Run(context.Background(), RunOptions{Task: "look at the keys", Backend: be}); err != nil && !strings.Contains(err.Error(), "no changes") {
+		t.Logf("run: %v", err)
+	}
+	if len(be.Seen) < 3 {
+		t.Fatalf("model saw %d turns", len(be.Seen))
+	}
+	for _, m := range be.Seen[len(be.Seen)-1] {
+		if strings.Contains(m.Content, "4242") {
+			t.Fatalf("a command returned protected content to the model:\n%s", m.Content)
+		}
+	}
+}
+
+// Analyzers and site checks run in the sandbox, so they cannot see a file the
+// read rules hide. A change to such a file must block, not pass unchecked.
+func TestChangeToHiddenFileBlocksChecks(t *testing.T) {
+	a, _, err := openWorld(t, func(p *policy.Policy) {
+		p.Permissions.Deny = append(p.Permissions.Deny, "read_file(keys/**)")
+		p.Analysis.Required = true
+		p.Analysis.Analyzers = []analysis.Analyzer{{Name: "true", Extensions: []string{".h", ".c"}, Command: "true"}}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	probe, _ := tools.NewRunner(tools.SandboxBestEffort, a.Repo.Root, nil, nil)
+	if probe == nil || !probe.Sandboxed() {
+		skipNoBwrap(t)
+	}
+	create, _ := json.Marshal(map[string]any{"path": "keys/new.h", "content": "int planted;\n"})
+	be := &llm.Scripted{Responses: []llm.Response{
+		{ToolCalls: []llm.ToolCall{{Name: "create_file", Args: create, Source: llm.SourceNative}}},
+		{ToolCalls: []llm.ToolCall{{Name: "run_tests", Args: json.RawMessage(`{}`), Source: llm.SourceNative}}},
+		{ToolCalls: []llm.ToolCall{{Name: "finish", Args: json.RawMessage(`{"summary":"added"}`), Source: llm.SourceNative}}},
+	}}
+	p, err := a.Run(context.Background(), RunOptions{Task: "add a header", Backend: be})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Status != proposal.StatusBlocked || !strings.Contains(strings.Join(p.Blocked, "\n"), "checks cannot see keys/new.h") {
+		t.Fatalf("status=%s blocked=%v", p.Status, p.Blocked)
+	}
+}
+
+// verify reports whether protected files can be hidden from commands, so a
+// site finds a too-old bubblewrap at acceptance rather than at first use.
+func TestPreflightReportsSandboxHiding(t *testing.T) {
+	_, checks, err := openWorld(t, func(p *policy.Policy) {
+		p.Permissions.Deny = append(p.Permissions.Deny, "read_file(keys/**)")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	probe, _ := tools.NewRunner(tools.SandboxBestEffort, t.TempDir(), nil, nil)
+	want := "FAIL"
+	if probe != nil && probe.CanHide() {
+		want = "PASS"
+	}
+	for _, c := range checks {
+		if c.Name == "sandbox hiding" {
+			if c.Status != want {
+				t.Fatalf("sandbox hiding = %s, want %s (%s)", c.Status, want, c.Detail)
+			}
+			return
+		}
+	}
+	t.Fatal("no sandbox hiding check with read rules in the policy")
+}
+
+// skipNoBwrap skips a sandbox test when bubblewrap is unusable, unless
+// GOVCODE_REQUIRE_BWRAP=1 (set in CI), where a skip would turn the
+// sandbox security tests into silent no-ops: then it fails instead.
+func skipNoBwrap(t *testing.T) {
+	t.Helper()
+	if os.Getenv("GOVCODE_REQUIRE_BWRAP") == "1" {
+		t.Fatal("bubblewrap is not usable here, but GOVCODE_REQUIRE_BWRAP=1 requires the sandbox tests to run")
+	}
+	t.Skip("bubblewrap not available")
 }

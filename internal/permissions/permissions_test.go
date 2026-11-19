@@ -63,3 +63,21 @@ func FuzzDecideNeverAllowsMeta(f *testing.F) {
 		}
 	})
 }
+
+func TestRestricts(t *testing.T) {
+	r, _ := Parse([]string{"read_file(src/**)"}, []string{"edit_file(Makefile)"}, []string{"run_command(rm *)"})
+	if r.Restricts("read_file") {
+		t.Error("an allow rule alone does not restrict read_file")
+	}
+	if !r.Restricts("edit_file") || !r.Restricts("run_command") {
+		t.Error("ask and deny rules restrict their tools")
+	}
+	star, _ := Parse(nil, nil, []string{"*(secrets/**)"})
+	if !star.Restricts("read_file") {
+		t.Error("a * deny rule restricts every tool")
+	}
+	var none *Rules
+	if none.Restricts("read_file") {
+		t.Error("nil rules restrict nothing")
+	}
+}

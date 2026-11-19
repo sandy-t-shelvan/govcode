@@ -59,7 +59,9 @@ jobs:
       - name: allow unprivileged user namespaces (bubblewrap)
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
       - name: tests with race detector and coverage floor
-        env: { GOPROXY: "off", GOFLAGS: "-mod=readonly" }
+        # GOVCODE_REQUIRE_BWRAP turns "bubblewrap unavailable" skips into
+        # failures, so the sandbox security tests can never pass by skipping.
+        env: { GOPROXY: "off", GOFLAGS: "-mod=readonly", GOVCODE_REQUIRE_BWRAP: "1" }
         run: scripts/ci/coverage.sh "$COVERAGE_FLOOR"
 
   fuzz:

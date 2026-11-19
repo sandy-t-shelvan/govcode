@@ -111,6 +111,22 @@ func (r *Rules) Decide(tool, subject string) (Decision, string) {
 	return Allow, "default"
 }
 
+// Restricts reports whether any deny or ask rule applies to tool (by name
+// or through "*"). With no such rule every subject is allowed for tool.
+func (r *Rules) Restricts(tool string) bool {
+	if r == nil {
+		return false
+	}
+	for _, rs := range [][]rule{r.deny, r.ask} {
+		for _, ru := range rs {
+			if ru.tool == tool || ru.tool == "*" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (r *Rules) match(rs []rule, tool, subject string) (string, bool) {
 	for _, ru := range rs {
 		if ru.tool != tool && ru.tool != "*" {

@@ -189,6 +189,13 @@ func (a *App) execute(ctx context.Context, o RunOptions, st *runstate.State, bac
 	if err != nil {
 		return nil, err
 	}
+	// Commands (tests, run_command, hooks, analyzers) must not read what
+	// read_file may not: files read rules deny or ask for are masked in the
+	// sandbox, and git history is hidden while any read rule exists.
+	runner.HideReadProtected(rules, p.Sandbox.Expose, p.Sandbox.ExposeGit)
+	if sd, err := filepath.Abs(p.StateDir); err == nil {
+		runner.Cover = []string{sd}
+	}
 	jail, err := tools.NewJail(wt)
 	if err != nil {
 		return nil, err
@@ -284,13 +291,26 @@ func (a *App) execute(ctx context.Context, o RunOptions, st *runstate.State, bac
 		fmt.Fprintf(a.Out, "\nRun %s %s; worktree and conversation kept.\n  Resume: govcode run --resume %s [\"follow-up\"]\n  Checkpoints: govcode rewind %s\n", id, st.Status, id, id)
 		return nil, fmt.Errorf("%w (run %s kept; resume with: govcode run --resume %s)", runErr, id, id)
 	}
+	// Analyzers and site checks run in the same sandbox, so they cannot see
+	// a changed file that read rules hide; such a file must not pass them
+	// as if it had been checked.
+	var unseen, checkable []string
+	if res != nil {
+		for _, f := range res.Changed {
+			if runner.Hide != nil && runner.Hide(f) {
+				unseen = append(unseen, f)
+			} else {
+				checkable = append(checkable, f)
+			}
+		}
+	}
 	var hookReport string
 	if res != nil && len(res.Changed) > 0 && len(p.Hooks.PreProposal) > 0 {
 		hookReport = env.RunHooks(ctx, "pre_proposal", p.Hooks.PreProposal, res.Changed)
 	}
 	var arep *analysis.Report
 	if res != nil && len(res.Changed) > 0 && (p.Analysis.Required || len(p.Analysis.Analyzers) > 0) {
-		arep = analysis.Run(ctx, runner, wt, p.Analysis.Analyzers, a.Analyzers, p.Analysis.UnanalyzedOK, res.Changed, p.Analysis.Timeout())
+		arep = analysis.Run(ctx, runner, wt, p.Analysis.Analyzers, a.Analyzers, p.Analysis.UnanalyzedOK, checkable, p.Analysis.Timeout())
 		for _, r := range arep.Results {
 			out := r.Output
 			if env.Spill("analysis output", out) {
@@ -377,6 +397,12 @@ func (a *App) execute(ctx context.Context, o RunOptions, st *runstate.State, bac
 				blocked = append(blocked, fmt.Sprintf("static analysis: no analyzer covers %s (add one, or an analysis.unanalyzed_ok pattern)", f))
 			}
 		}
+	}
+	if len(unseen) > 0 && (p.Analysis.Required || len(p.Analysis.Analyzers) > 0 || len(p.Hooks.PreProposal) > 0) {
+		for _, f := range unseen {
+			blocked = append(blocked, fmt.Sprintf("checks cannot see %s: read rules hide it from analyzers and site checks", f))
+		}
+		sess.Record("checks_unseen", map[string]any{"proposal": id, "files": strings.Join(unseen, ",")})
 	}
 	if len(blocked) > 0 {
 		status = proposal.StatusBlocked

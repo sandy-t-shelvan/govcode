@@ -50,7 +50,9 @@
     "extra_ro_paths": [
       "/opt/gnat"
     ],
-    "env": []
+    "env": [],
+    "expose": [],
+    "expose_git": false
   },
   "trust": {
     "enforce": "strict",
@@ -78,8 +80,7 @@
     "ask": [
       "edit_file(Makefile)",
       "edit_file(**/*.gpr)",
-      "edit_file(build/**)",
-      "run_command(git *)"
+      "edit_file(build/**)"
     ],
     "deny": [
       "read_file(keys/**)",

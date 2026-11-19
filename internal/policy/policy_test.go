@@ -102,3 +102,40 @@ func TestModelOriginValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestSandboxExposeFieldsLoad(t *testing.T) {
+	p := Dev(t.TempDir(), filepath.Join(t.TempDir(), "state"), "alice")
+	p.Sandbox.Expose = []string{"keys/test/**"}
+	p.Sandbox.ExposeGit = true
+	got, _, err := Load(write(t, p))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Sandbox.Expose) != 1 || got.Sandbox.Expose[0] != "keys/test/**" || !got.Sandbox.ExposeGit {
+		t.Fatalf("sandbox = %+v", got.Sandbox)
+	}
+}
+
+// The shipped example policy must parse with the strict decoder (unknown
+// fields are rejected), so a typo or a removed field is caught here.
+func TestExamplePolicyDecodesStrictly(t *testing.T) {
+	f, err := os.Open("../../deploy/policy.example.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	dec := json.NewDecoder(f)
+	dec.DisallowUnknownFields()
+	var p Policy
+	if err := dec.Decode(&p); err != nil {
+		t.Fatalf("deploy/policy.example.json: %v", err)
+	}
+	if p.Sandbox.ExposeGit || len(p.Sandbox.Expose) != 0 {
+		t.Fatalf("example policy should not expose anything by default: %+v", p.Sandbox)
+	}
+	for _, r := range p.Permissions.Ask {
+		if strings.HasPrefix(r, "run_command(git") {
+			t.Fatalf("example still asks for %s, which cannot work while git is hidden", r)
+		}
+	}
+}
