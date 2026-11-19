@@ -1,0 +1,336 @@
+{
+  "model": "devstral-small-24b",
+  "num_ctx": 32768,
+  "started": "2026-11-19T22:11:23Z",
+  "results": [
+    {
+      "id": "01-c-buffer-overflow",
+      "language": "C",
+      "title": "Unbounded strcpy overruns callsign buffer",
+      "passed": true,
+      "check_output": "ok\n",
+      "metrics": {
+        "turns": 30,
+        "calls_emitted": 30,
+        "parsed_by": {
+          "native": 30
+        },
+        "unknown_tool": 0,
+        "schema_invalid": 0,
+        "exec_ok": 21,
+        "exec_error": 9,
+        "no_call_turns": 0,
+        "context_trims": 0,
+        "prompt_tokens": 142677,
+        "completion_tokens": 4098,
+        "model_time_ns": 55391763059,
+        "finished": false,
+        "stop_reason": "max_turns"
+      },
+      "valid_call_rate": 1,
+      "changed": [
+        "track.c",
+        "test_01.c"
+      ],
+      "duration_s": 55.727283367
+    },
+    {
+      "id": "02-c-sign-extension",
+      "language": "C",
+      "title": "Checksum wrong for payload bytes \u003e= 0x80",
+      "passed": true,
+      "check_output": "ok\n",
+      "metrics": {
+        "turns": 11,
+        "calls_emitted": 11,
+        "parsed_by": {
+          "native": 11
+        },
+        "unknown_tool": 0,
+        "schema_invalid": 0,
+        "exec_ok": 11,
+        "exec_error": 0,
+        "no_call_turns": 0,
+        "context_trims": 0,
+        "prompt_tokens": 28104,
+        "completion_tokens": 1194,
+        "model_time_ns": 16451632638,
+        "finished": true,
+        "stop_reason": "finished"
+      },
+      "valid_call_rate": 1,
+      "changed": [
+        "frame.c",
+        "test_02.c"
+      ],
+      "duration_s": 16.569171359
+    },
+    {
+      "id": "03-c-implement-crc",
+      "language": "C",
+      "title": "Implement stubbed CRC-16/CCITT",
+      "passed": true,
+      "check_output": "ok\n",
+      "metrics": {
+        "turns": 10,
+        "calls_emitted": 10,
+        "parsed_by": {
+          "native": 10
+        },
+        "unknown_tool": 0,
+        "schema_invalid": 0,
+        "exec_ok": 10,
+        "exec_error": 0,
+        "no_call_turns": 0,
+        "context_trims": 0,
+        "prompt_tokens": 25317,
+        "completion_tokens": 1128,
+        "model_time_ns": 18775182438,
+        "finished": true,
+        "stop_reason": "finished"
+      },
+      "valid_call_rate": 1,
+      "changed": [
+        "crc.c"
+      ],
+      "duration_s": 19.026307913
+    },
+    {
+      "id": "04-cpp-auto-ptr",
+      "language": "C++",
+      "title": "Port std::auto_ptr to C++17",
+      "passed": true,
+      "check_output": "ok\n",
+      "metrics": {
+        "turns": 10,
+        "calls_emitted": 10,
+        "parsed_by": {
+          "native": 10
+        },
+        "unknown_tool": 0,
+        "schema_invalid": 0,
+        "exec_ok": 10,
+        "exec_error": 0,
+        "no_call_turns": 0,
+        "context_trims": 0,
+        "prompt_tokens": 23942,
+        "completion_tokens": 627,
+        "model_time_ns": 14615820088,
+        "finished": true,
+        "stop_reason": "finished"
+      },
+      "valid_call_rate": 1,
+      "changed": [
+        "sensor_bus.h",
+        "sensor_bus.cpp"
+      ],
+      "duration_s": 15.424000871
+    },
+    {
+      "id": "05-cpp-rule-of-three",
+      "language": "C++",
+      "title": "Shallow copy causes double free",
+      "passed": true,
+      "check_output": "ok\n",
+      "metrics": {
+        "turns": 15,
+        "calls_emitted": 15,
+        "parsed_by": {
+          "native": 15
+        },
+        "unknown_tool": 0,
+        "schema_invalid": 0,
+        "exec_ok": 15,
+        "exec_error": 0,
+        "no_call_turns": 0,
+        "context_trims": 0,
+        "prompt_tokens": 49177,
+        "completion_tokens": 2109,
+        "model_time_ns": 28847630767,
+        "finished": true,
+        "stop_reason": "finished"
+      },
+      "valid_call_rate": 1,
+      "changed": [
+        "msgbuf.cpp",
+        "msgbuf.h",
+        "test_05.cpp"
+      ],
+      "duration_s": 29.034778356
+    },
+    {
+      "id": "06-ada-constraint-error",
+      "language": "Ada",
+      "title": "Constraint_Error when turn crosses north",
+      "passed": false,
+      "check_output": "\nraised CONSTRAINT_ERROR : nav.adb:5 range check failed\nmake: *** [Makefile:2: test] Error 1\n",
+      "metrics": {
+        "turns": 30,
+        "calls_emitted": 30,
+        "parsed_by": {
+          "native": 30
+        },
+        "unknown_tool": 0,
+        "schema_invalid": 0,
+        "exec_ok": 16,
+        "exec_error": 14,
+        "no_call_turns": 0,
+        "context_trims": 0,
+        "prompt_tokens": 109267,
+        "completion_tokens": 2390,
+        "model_time_ns": 32456722907,
+        "finished": false,
+        "stop_reason": "max_turns"
+      },
+      "valid_call_rate": 1,
+      "changed": [
+        "nav_new.adb",
+        "nav_fixed.adb"
+      ],
+      "duration_s": 32.604151292
+    },
+    {
+      "id": "07-ada-missing-body",
+      "language": "Ada",
+      "title": "Implement procedure declared in spec",
+      "passed": true,
+      "check_output": "ok\n",
+      "metrics": {
+        "turns": 8,
+        "calls_emitted": 8,
+        "parsed_by": {
+          "native": 8
+        },
+        "unknown_tool": 0,
+        "schema_invalid": 0,
+        "exec_ok": 8,
+        "exec_error": 0,
+        "no_call_turns": 0,
+        "context_trims": 0,
+        "prompt_tokens": 16527,
+        "completion_tokens": 587,
+        "model_time_ns": 8043604787,
+        "finished": true,
+        "stop_reason": "finished"
+      },
+      "valid_call_rate": 1,
+      "changed": [
+        "sensors.adb"
+      ],
+      "duration_s": 8.258267557
+    },
+    {
+      "id": "08-cobol-pic-truncation",
+      "language": "COBOL",
+      "title": "Rate truncated by PIC clause",
+      "passed": false,
+      "check_output": "\u003ccommand-line\u003e: warning: \"_FORTIFY_SOURCE\" redefined\n\u003ccommand-line\u003e: note: this is the location of the previous definition\nINTEREST=    500.00\nmake: *** [Makefile:2: test] Error 1\n",
+      "metrics": {
+        "turns": 30,
+        "calls_emitted": 30,
+        "parsed_by": {
+          "native": 30
+        },
+        "unknown_tool": 0,
+        "schema_invalid": 0,
+        "exec_ok": 4,
+        "exec_error": 26,
+        "no_call_turns": 0,
+        "context_trims": 0,
+        "prompt_tokens": 123851,
+        "completion_tokens": 2547,
+        "model_time_ns": 34655531325,
+        "finished": false,
+        "stop_reason": "max_turns"
+      },
+      "valid_call_rate": 1,
+      "changed": null,
+      "duration_s": 34.752886431
+    },
+    {
+      "id": "09-cobol-perform-varying",
+      "language": "COBOL",
+      "title": "Annual total skips December",
+      "passed": true,
+      "check_output": "ANNUAL=   7800.00\n",
+      "metrics": {
+        "turns": 13,
+        "calls_emitted": 13,
+        "parsed_by": {
+          "native": 13
+        },
+        "unknown_tool": 0,
+        "schema_invalid": 0,
+        "exec_ok": 8,
+        "exec_error": 5,
+        "no_call_turns": 0,
+        "context_trims": 0,
+        "prompt_tokens": 35968,
+        "completion_tokens": 963,
+        "model_time_ns": 13433046077,
+        "finished": true,
+        "stop_reason": "finished"
+      },
+      "valid_call_rate": 1,
+      "changed": [
+        "ANNUAL.cbl"
+      ],
+      "duration_s": 13.538712166
+    },
+    {
+      "id": "10-c-rename-across-files",
+      "language": "C",
+      "title": "Rename a function across the codebase",
+      "passed": true,
+      "check_output": "ch2=22\nok\n",
+      "metrics": {
+        "turns": 17,
+        "calls_emitted": 17,
+        "parsed_by": {
+          "native": 17
+        },
+        "unknown_tool": 0,
+        "schema_invalid": 0,
+        "exec_ok": 16,
+        "exec_error": 1,
+        "no_call_turns": 0,
+        "context_trims": 0,
+        "prompt_tokens": 42602,
+        "completion_tokens": 1143,
+        "model_time_ns": 15570479851,
+        "finished": true,
+        "stop_reason": "finished"
+      },
+      "valid_call_rate": 1,
+      "changed": [
+        "src/log.c",
+        "src/monitor.c",
+        "test_10.c",
+        "src/sensor.h",
+        "src/sensor.c"
+      ],
+      "duration_s": 15.694856687
+    }
+  ],
+  "totals": {
+    "tasks": 10,
+    "run": 10,
+    "passed": 8,
+    "calls_emitted": 174,
+    "valid_calls": 174,
+    "exec_ok": 119,
+    "exec_error": 55,
+    "unknown_tool": 0,
+    "schema_invalid": 0,
+    "no_call_turns": 0,
+    "turns": 174,
+    "parsed_by": {
+      "native": 174
+    },
+    "finished": 7,
+    "prompt_tokens": 597432,
+    "output_tokens": 16786,
+    "model_seconds": 238.24141393699998
+  },
+  "complete": true
+}

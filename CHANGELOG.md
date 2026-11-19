@@ -12,6 +12,14 @@
 - Hiding needs a bubblewrap with `--args` and `--remount-ro`; with an older one, commands are refused while read rules exist. `govcode verify` reports it as `sandbox hiding`.
 - A proposal that changes a file read rules hide is `blocked` when the policy has analyzers or pre-proposal checks, since they run in the sandbox and cannot see it.
 
+### Fixes
+- llama.cpp now serves Devstral with tool calls. Its first-party GGUF embeds a chat template with no tool support, so `llama-server --jinja` dropped the tools and the model never called one. The lock pins a tool-capable template (`serve.llamacpp_chat_template`: path, size, sha256, source), `govcode model verify` checks it, and `deploy/llamacpp/serve.sh` passes it with `--chat-template-file`. A staged directory without that file now fails verification (GOV-10).
+- `deploy/llamacpp/serve.sh` runs with `-np 1`, so the single session gets the whole `num_ctx` instead of a slot's share.
+
+### Additions
+- `govcode eval -seed` sets the sampling seed (default 42, as before).
+- docs/EVAL.md: Devstral-Small-2507 Q4_K_M on an RTX PRO 6000 GPU via llama.cpp, three seeds: 27/30 tasks passed, 100% valid tool calls (GOV-10).
+
 ## 0.3.0 (2026-11-19)
 
 The first tagged release. Earlier builds (0.1.0, 0.2.0-rc1/rc2) were untagged development builds.
