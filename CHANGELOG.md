@@ -18,7 +18,13 @@
 - Ollama now gets tool calls from Devstral. `deploy/ollama/Modelfile.devstral-small-24b` rendered calls in the old `[TOOL_CALLS][{"name":…}]` form, and Ollama builds its tool parser from that rendering. Devstral-Small-2507 writes `[TOOL_CALLS]name[ARGS]{…}`, so Ollama parsed none of its calls. The tool list also dropped out of the prompt after the first tool result. The Modelfile now uses the v11 format and lists the tools before the last user message. This changes the model's Ollama digest, so re-stage before deploying (GOV-10).
 - The Mistral text fallback accepts `[TOOL_CALLS]name{…}` without `[ARGS]` when `name` is a known tool.
 
+- `deploy/vllm/serve.sh` can load the pinned Devstral weights. It forced `--load-format mistral`, which reads `consolidated*.safetensors`, but the lock pins the Hugging Face-format shards (GOV-9).
+- `scripts/stage-models.sh` verifies first-party upstream files for every model. For Devstral it used to fetch only the GGUF, so the shards were never checked against the lock. It also malware-scans everything it stages, and a rerun reuses files already staged instead of downloading them again.
+- `govcode model verify` checks the upstream files staged for vLLM in `weights/<model-id>/`, and refuses any file there the lock does not list.
+
 ### Additions
+- `GOVCODE_STAGE_UPSTREAM=1` stages the verified safetensors for vLLM.
+- docs/EVAL.md: Devstral-Small-2507 BF16 on vLLM, three seeds: 29/30 tasks passed, 100% valid tool calls (GOV-9).
 - `govcode eval -seed` sets the sampling seed (default 42, as before).
 - docs/EVAL.md: Devstral-Small-2507 Q4_K_M on an RTX PRO 6000 GPU via llama.cpp, three seeds: 27/30 tasks passed, 100% valid tool calls (GOV-10).
 
