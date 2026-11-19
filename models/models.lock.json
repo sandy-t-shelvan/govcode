@@ -127,7 +127,7 @@
         "max_tokens": 4096,
         "temperature": 0.15,
         "vllm_tool_call_parser": "mistral",
-        "ollama_manifest_digest": "4a7356ef13402f1094d184f3f56825d263a8da3603d6523ce25cb97c14334105",
+        "ollama_manifest_digest": "72998df848f8f75a0925b86a45368bb72a19d96411589645b2ea9764aa9a2e1e",
         "llamacpp_chat_template": {
           "path": "devstral-small-24b.chat_template.jinja",
           "size": 9838,

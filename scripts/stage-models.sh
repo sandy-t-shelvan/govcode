@@ -78,7 +78,14 @@ for id in "${IDS[@]}"; do
   m=$(jq -c --arg id "$id" '.models[] | select(.id==$id)' "$LOCK")
   [ -n "$m" ] || { echo "unknown model $id" >&2; exit 1; }
   repo=$(jq -r .upstream.repo <<<"$m"); rev=$(jq -r .upstream.revision <<<"$m")
-  src=$OUT/build/$id-src; mkdir -p "$src"
+  src=$OUT/build/$id-src
+  # A previous GOVCODE_STAGE_UPSTREAM=1 run moved the upstream files to
+  # weights/<id>/. Reuse them (they are re-verified below) instead of
+  # downloading every shard again.
+  if [ -d "$OUT/weights/$id" ] && [ -z "$(ls -A "$src" 2>/dev/null)" ]; then
+    rm -rf "$src"; mv "$OUT/weights/$id" "$src"
+  fi
+  mkdir -p "$src"
 
   # 1. first-party upstream files at the pinned revision, verified
   jq -c '.upstream.files[]' <<<"$m" | while read -r f; do
