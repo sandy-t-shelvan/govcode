@@ -87,6 +87,13 @@ func (t *listFiles) Run(ctx context.Context, a map[string]any) (string, error) {
 // no '/' matches the base name at any depth (so '*.c' finds src/a.c).
 func globMatch(pattern, name string) bool { return permissions.PathMatch(pattern, name) }
 
+// grepHit splits one `git grep -n -z` hit (path NUL lineno NUL text).
+func grepHit(l string) (file, lineno, text string) {
+	file, rest, _ := strings.Cut(l, "\x00")
+	lineno, text, _ = strings.Cut(rest, "\x00")
+	return file, lineno, text
+}
+
 // ---- search ----
 
 type search struct{ e *Env }
@@ -107,7 +114,9 @@ func (t *search) Run(ctx context.Context, a map[string]any) (string, error) {
 	if _, err := regexp.Compile(pat); err != nil {
 		return "", fmt.Errorf("invalid regex: %v", err)
 	}
-	args := []string{"-C", t.e.Jail.Root, "grep", "-n", "-I", "-E", "--untracked", "--no-color", "--full-name"}
+	// -z separates path, line number and text with NUL, so a path that
+	// contains ':' cannot be confused with the line-number field.
+	args := []string{"-C", t.e.Jail.Root, "grep", "-n", "-z", "-I", "-E", "--untracked", "--no-color", "--full-name"}
 	if boolean(a, "ignore_case") {
 		args = append(args, "-i")
 	}
@@ -180,12 +189,16 @@ func (t *search) Run(ctx context.Context, a map[string]any) (string, error) {
 	for {
 		l, rerr := rd.ReadString('\n')
 		if l = strings.TrimRight(l, "\n"); l != "" {
-			file, rest, _ := strings.Cut(l, ":")
+			file, lineno, text := grepHit(l)
+			l = file + ":" + lineno + ":" + text
 			switch {
 			case !canShow(file):
 			case len(lines) >= maxSearchResults:
 				more++
-			case t.e.spill("search result in "+file, rest):
+			// The spillage guard must see the file's own line: portion marks
+			// and banner lines are recognised only at the start of a line,
+			// and a "path:lineno:" prefix would hide them from it.
+			case t.e.spill("search result in "+file, text):
 				hidden++
 			default:
 				if len(l) > maxLineWidth {
