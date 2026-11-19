@@ -76,6 +76,24 @@ func TestMistralV11(t *testing.T) {
 	}
 }
 
+// Captured from Devstral-Small-2507 Q4_K_M on Ollama v0.40.16 with the old
+// Modelfile template (GOV-10): Ollama dropped [ARGS] and parsed no call.
+func TestMistralV11WithoutArgsMarker(t *testing.T) {
+	in := `[TOOL_CALLS]read_file{"path":"main.c"}`
+	calls, rest := ExtractToolCalls(in, testTools)
+	if len(calls) != 1 || calls[0].Name != "read_file" || calls[0].Source != SourceMistral || args(t, calls[0])["path"] != "main.c" || rest != "" {
+		t.Fatalf("got %+v rest=%q", calls, rest)
+	}
+	// Without [ARGS] an unknown name is not a call.
+	if calls, _ := ExtractToolCalls(`[TOOL_CALLS]config{"debug":true}`, testTools); len(calls) != 0 {
+		t.Fatalf("unknown tool without [ARGS] accepted: %+v", calls)
+	}
+	// With [ARGS] the marker itself is explicit, as before.
+	if calls, _ := ExtractToolCalls(`[TOOL_CALLS]other_tool[ARGS]{"a":1}`, testTools); len(calls) != 1 {
+		t.Fatalf("explicit [ARGS] call dropped: %+v", calls)
+	}
+}
+
 func TestJSONFenceOnlyKnownTools(t *testing.T) {
 	in := "Example config:\n```json\n{\"name\": \"server\", \"arguments\": {}}\n```\nNow:\n```json\n{\"name\": \"read_file\", \"arguments\": {\"path\": \"a.c\"}}\n```"
 	calls, _ := ExtractToolCalls(in, testTools)

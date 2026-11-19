@@ -7,20 +7,32 @@ PARAMETER num_predict 4096
 PARAMETER temperature 0.15
 PARAMETER stop "</s>"
 
-# Mistral tekken tool format: [AVAILABLE_TOOLS] / [TOOL_CALLS] / [TOOL_RESULTS]
-TEMPLATE """{{- range $index, $_ := .Messages }}
+# Mistral tekken v11 tool format, as Devstral-Small-2507 emits it:
+#   [AVAILABLE_TOOLS]...[/AVAILABLE_TOOLS] before the LAST user message (so the
+#   tools stay in the prompt for the whole agent loop, not just turn 1),
+#   [TOOL_CALLS]name[ARGS]{...} per call, [TOOL_RESULTS]...[/TOOL_RESULTS].
+# Ollama derives its tool-call parser from how .ToolCalls is rendered here. The
+# older [TOOL_CALLS][{"name":...}] rendering made Ollama miss every call this
+# model makes (0 tool calls in GOV-10), so keep the two in step. The structure
+# matters too, not just the text: Ollama 0.40.16 only parsed calls with the
+# range inside "if .ToolCalls"; a bare range after the content rendered the
+# same prompt but parsed nothing. Content and calls are both kept, because
+# Devstral usually writes a sentence before each call.
+TEMPLATE """{{- $lastUserIndex := -1 }}
+{{- range $index, $_ := .Messages }}
+{{- if eq .Role "user" }}{{ $lastUserIndex = $index }}{{ end }}
+{{- end }}
+{{- range $index, $_ := .Messages }}
 {{- if eq .Role "system" }}[SYSTEM_PROMPT]{{ .Content }}[/SYSTEM_PROMPT]
 {{- else if eq .Role "user" }}
-{{- if and (le (len (slice $.Messages $index)) 2) $.Tools }}[AVAILABLE_TOOLS]{{ $.Tools }}[/AVAILABLE_TOOLS]
+{{- if and (eq $lastUserIndex $index) $.Tools }}[AVAILABLE_TOOLS]{{ $.Tools }}[/AVAILABLE_TOOLS]
 {{- end }}[INST]{{ .Content }}[/INST]
 {{- else if eq .Role "assistant" }}
-{{- if .Content }}{{ .Content }}
-{{- if not (eq (len (slice $.Messages $index)) 1) }}</s>
+{{- if .Content }}{{ .Content }}{{ end }}
+{{- if .ToolCalls }}
+{{- range .ToolCalls }}[TOOL_CALLS]{{ .Function.Name }}[ARGS]{{ .Function.Arguments }}{{ end }}
 {{- end }}
-{{- else if .ToolCalls }}[TOOL_CALLS][
-{{- range .ToolCalls }}{"name": "{{ .Function.Name }}", "arguments": {{ .Function.Arguments }}}
-{{- end }}]</s>
-{{- end }}
-{{- else if eq .Role "tool" }}[TOOL_RESULTS]{"content": {{ .Content }}}[/TOOL_RESULTS]
+{{- if not (eq (len (slice $.Messages $index)) 1) }}</s>{{ end }}
+{{- else if eq .Role "tool" }}[TOOL_RESULTS]{{ .Content }}[/TOOL_RESULTS]
 {{- end }}
 {{- end }}"""
