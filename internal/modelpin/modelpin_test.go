@@ -50,6 +50,36 @@ func TestVerifyArtifacts(t *testing.T) {
 	}
 }
 
+func TestVerifyArtifactsChatTemplate(t *testing.T) {
+	dir := t.TempDir()
+	w := filepath.Join(dir, "weights")
+	os.MkdirAll(w, 0o755)
+	os.WriteFile(filepath.Join(w, "m.gguf"), []byte("GGUFwts"), 0o644)
+	os.WriteFile(filepath.Join(w, "m.jinja"), []byte("{{ tools }}"), 0o644)
+	gs, _, _ := HashFile(filepath.Join(w, "m.gguf"))
+	ts, _, _ := HashFile(filepath.Join(w, "m.jinja"))
+	m := &Model{
+		Artifact: Source{Files: []File{{Path: "m.gguf", SHA256: gs}}},
+		Serve:    Serve{LlamaCppChatTemplate: &ChatTemplate{File: File{Path: "m.jinja", Size: 11, SHA256: ts}}},
+	}
+	// A template is text, not GGUF/safetensors: it must not be refused as a weight.
+	if p := VerifyArtifacts(m, dir, nil); len(p) != 0 {
+		t.Fatalf("good template failed: %v", p)
+	}
+	os.WriteFile(filepath.Join(w, "m.jinja"), []byte("{{ nothing }}"), 0o644)
+	if p := VerifyArtifacts(m, dir, nil); len(p) == 0 {
+		t.Fatal("tampered chat template passed")
+	}
+	os.Remove(filepath.Join(w, "m.jinja"))
+	if p := VerifyArtifacts(m, dir, nil); len(p) != 1 {
+		t.Fatal("missing chat template passed")
+	}
+	m.Serve.LlamaCppChatTemplate.SHA256 = Unfilled
+	if p := VerifyArtifacts(m, dir, nil); len(p) != 1 {
+		t.Fatal("unstaged chat template passed")
+	}
+}
+
 func TestCheckOllama(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, `{"models":[{"name":"govcode-qwen3-coder:30b-q4km","digest":"abc123"}]}`)

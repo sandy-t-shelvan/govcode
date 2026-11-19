@@ -48,6 +48,19 @@ type Serve struct {
 	// offered (see llm.Options.ToolPrompt). It is part of the signed lock
 	// because it changes how the model behaves.
 	ToolPrompt string `json:"tool_prompt,omitempty"`
+	// LlamaCppChatTemplate, if set, is the Jinja chat template llama-server
+	// must use instead of the one embedded in the GGUF (passed with
+	// --chat-template-file). Some first-party GGUFs embed a template with no
+	// tool support, and llama.cpp then drops the tools without an error.
+	// It is staged under weights/ and verified like a weight file.
+	LlamaCppChatTemplate *ChatTemplate `json:"llamacpp_chat_template,omitempty"`
+}
+
+// ChatTemplate is a staged Jinja chat template and where it came from.
+type ChatTemplate struct {
+	File
+	// Source names the pinned origin, e.g. "ggml-org/llama.cpp@<commit>:<path>".
+	Source string `json:"source"`
 }
 
 // Lineage names a model this one was derived from (fine-tuned, distilled
@@ -140,29 +153,40 @@ type Problem struct {
 func VerifyArtifacts(m *Model, dir string, progress func(string)) []Problem {
 	var probs []Problem
 	for _, f := range m.Artifact.Files {
-		p := filepath.Join(dir, "weights", f.Path)
-		if f.SHA256 == "" || f.SHA256 == Unfilled {
-			probs = append(probs, Problem{p, "lock has no SHA-256 for this file (not staged)"})
-			continue
-		}
+		probs = append(probs, verifyFile(dir, f, true, progress)...)
+	}
+	if t := m.Serve.LlamaCppChatTemplate; t != nil {
+		probs = append(probs, verifyFile(dir, t.File, false, progress)...)
+	}
+	return probs
+}
+
+// verifyFile checks one staged file under dir/weights against the lock.
+// Weight files must also be GGUF or safetensors by content; a chat template
+// is text, so that check is skipped for it.
+func verifyFile(dir string, f File, weight bool, progress func(string)) []Problem {
+	p := filepath.Join(dir, "weights", f.Path)
+	if f.SHA256 == "" || f.SHA256 == Unfilled {
+		return []Problem{{p, "lock has no SHA-256 for this file (not staged)"}}
+	}
+	if weight {
 		if err := CheckWeightFile(p); err != nil {
-			probs = append(probs, Problem{p, err.Error()})
-			continue
+			return []Problem{{p, err.Error()}}
 		}
-		if progress != nil {
-			progress(p)
-		}
-		sum, size, err := HashFile(p)
-		if err != nil {
-			probs = append(probs, Problem{p, err.Error()})
-			continue
-		}
-		if f.Size > 0 && size != f.Size {
-			probs = append(probs, Problem{p, fmt.Sprintf("size %d, lock says %d", size, f.Size)})
-		}
-		if sum != f.SHA256 {
-			probs = append(probs, Problem{p, fmt.Sprintf("sha256 %s, lock says %s", sum, f.SHA256)})
-		}
+	}
+	if progress != nil {
+		progress(p)
+	}
+	sum, size, err := HashFile(p)
+	if err != nil {
+		return []Problem{{p, err.Error()}}
+	}
+	var probs []Problem
+	if f.Size > 0 && size != f.Size {
+		probs = append(probs, Problem{p, fmt.Sprintf("size %d, lock says %d", size, f.Size)})
+	}
+	if sum != f.SHA256 {
+		probs = append(probs, Problem{p, fmt.Sprintf("sha256 %s, lock says %s", sum, f.SHA256)})
 	}
 	return probs
 }
