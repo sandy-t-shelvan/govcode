@@ -15,6 +15,8 @@
 ### Fixes
 - llama.cpp now serves Devstral with tool calls. Its first-party GGUF embeds a chat template with no tool support, so `llama-server --jinja` dropped the tools and the model never called one. The lock pins a tool-capable template (`serve.llamacpp_chat_template`: path, size, sha256, source), `govcode model verify` checks it, and `deploy/llamacpp/serve.sh` passes it with `--chat-template-file`. A staged directory without that file now fails verification (GOV-10).
 - `deploy/llamacpp/serve.sh` runs with `-np 1`, so the single session gets the whole `num_ctx` instead of a slot's share.
+- Ollama now gets tool calls from Devstral. `deploy/ollama/Modelfile.devstral-small-24b` rendered calls in the old `[TOOL_CALLS][{"name":…}]` form, and Ollama builds its tool parser from that rendering. Devstral-Small-2507 writes `[TOOL_CALLS]name[ARGS]{…}`, so Ollama parsed none of its calls. The tool list also dropped out of the prompt after the first tool result. The Modelfile now uses the v11 format and lists the tools before the last user message. This changes the model's Ollama digest, so re-stage before deploying (GOV-10).
+- The Mistral text fallback accepts `[TOOL_CALLS]name{…}` without `[ARGS]` when `name` is a known tool.
 
 ### Additions
 - `govcode eval -seed` sets the sampling seed (default 42, as before).

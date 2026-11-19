@@ -150,15 +150,62 @@ Raw reports: [`docs/results/gov-10-devstral-gpu/llamacpp-q4km/`](results/gov-10-
 
 What it shows:
 
-- **The GGUF's embedded chat template has no tool support. This was the one blocker.** The template inside Mistral's first-party GGUF has no `[AVAILABLE_TOOLS]` or `[TOOL_CALLS]`, and it raises on a `tool`-role message. `llama-server --jinja` drops the `tools` array without an error. On the first attempt the model answered in prose and made **0 tool calls** on task 01 ([report](results/gov-10-devstral-gpu/llamacpp-q4km/embedded-template/)). llama.cpp ships and tests a correct template for this model. The lock now pins it (path, size, sha256, source commit), `govcode model verify` checks it, and `deploy/llamacpp/serve.sh` passes it with `--chat-template-file`. With it, the same task passed with 9 of 9 native calls. The Ollama path is not affected, because its Modelfile has its own `TEMPLATE`. This is the same class of problem Granite had in GOV-40: check the template before blaming the model.
+- **The GGUF's embedded chat template has no tool support. This was the blocker on llama.cpp.** The template inside Mistral's first-party GGUF has no `[AVAILABLE_TOOLS]` or `[TOOL_CALLS]`, and it raises on a `tool`-role message. `llama-server --jinja` drops the `tools` array without an error. On the first attempt the model answered in prose and made **0 tool calls** on task 01 ([report](results/gov-10-devstral-gpu/llamacpp-q4km/embedded-template/)). llama.cpp ships and tests a correct template for this model. The lock now pins it (path, size, sha256, source commit), `govcode model verify` checks it, and `deploy/llamacpp/serve.sh` passes it with `--chat-template-file`. With it, the same task passed with 9 of 9 native calls. Ollama had its own template problem, covered in the next section. This is the same class of problem Granite had in GOV-40: check the template before blaming the model.
 - **`serve.sh` also needed `-np 1`.** Without it, llama-server splits `-c` across several slots, and each request gets a fraction of `num_ctx`.
 - **Tool-call format is solved for this model; what remains is tool use.** No call was malformed, unknown or schema-invalid. 88 of the 103 failed executions are in the Ada and COBOL tasks (06, 08, 09), and the three failed task runs are where they pile up (14 and 26 errors on seed 1). The report records counts, not causes. The likely cause is `edit_file` text that does not match exactly in fixed-column and whitespace-sensitive sources, but these runs do not show that. Capture transcripts with `-verbose` to check it.
 - **Passing is not the same as finishing.** Task 01 passed on seeds 42 and 1 at the 30-turn limit without calling `finish`. The checker passed the tree, but `govcode run` would leave that proposal `incomplete`, so it would not reach approval. Count those passes accordingly.
 - **The failures are spread out.** Each failure is in a different task, and every task passed in at least two of three runs. On seed 42, task 02 used all 30 turns adding debug prints to `frame.c` and never found that `sum += buf[i]` sign-extends a `char`. The hidden checker, copied over the model's own `test_02.c`, still saw `0xff83`. Seeds 1 and 2 fixed it in 10–11 turns.
 - **A fixed seed does not make runs repeatable.** A single-task smoke run at seed 42 finished task 01 in 9 turns. The full run, also at seed 42, took 30. llama.cpp is not bit-for-bit deterministic across runs, and this is why the results above use several seeds.
 
+## Devstral-Small-2507 Q4_K_M on GPU, Ollama (GOV-10)
+
+This is the same GGUF as the llama.cpp runs above, served by Ollama, which is the default backend in `deploy/policy.example.json`. It was staged with `scripts/stage-models.sh`: imported with `deploy/ollama/Modelfile.devstral-small-24b`, and its manifest digest is pinned in the lock.
+
+| | |
+|---|---|
+| Model | as above: `Devstral-Small-2507-Q4_K_M.gguf`, sha256 `1bcc2b1b…1796` |
+| Server | Ollama v0.40.16 (`d63b7026`, release tarball checked against its `sha256sum.txt`), 127.0.0.1:11434, `OLLAMA_CONTEXT_LENGTH=32768`. All 41/41 layers on the GPU, f16 KV cache. Manifest digest `72998df8…a2e1e` |
+| Sampler | the Modelfile's `temperature 0.15`, `num_ctx 32768`, `num_predict 4096`. Ollama defaults otherwise (top_k 40, top_p 0.9, repeat_penalty 1.0) |
+| Throughput | about 84 tokens/s generation |
+| govcode | as above, `-backend ollama -model govcode-devstral:24b-q4km`, `-seed` 42 / 1 / 2 |
+
+Raw reports: [`docs/results/gov-10-devstral-gpu/ollama-q4km/`](results/gov-10-devstral-gpu/ollama-q4km/).
+
+| Task | Lang | Passed (42 / 1 / 2) | Finished | Turns | Exec errors |
+|---|---|---|---|---|---|
+| 01 buffer overflow | C | **yes** / **yes** / **yes** | yes / yes / yes | 22 / 11 / 13 | 2 / 0 / 1 |
+| 02 sign extension | C | **yes** / **yes** / **yes** | yes / yes / yes | 13 / 10 / 11 | 0 / 0 / 0 |
+| 03 implement CRC | C | **yes** / **yes** / **yes** | yes / yes / yes | 7 / 10 / 10 | 0 / 0 / 0 |
+| 04 auto_ptr port | C++ | no / no / **yes** | no / no / yes | 30 / 30 / 12 | 22 / 20 / 0 |
+| 05 rule of three | C++ | **yes** / **yes** / **yes** | yes / yes / yes | 10 / 10 / 10 | 0 / 0 / 0 |
+| 06 Constraint_Error | Ada | **yes** / no / **yes** | yes / no / yes | 25 / 30 / 28 | 6 / 23 / 6 |
+| 07 missing body | Ada | **yes** / **yes** / **yes** | yes / yes / yes | 14 / 15 / 12 | 3 / 4 / 2 |
+| 08 PIC truncation | COBOL | no / **yes** / no | no / yes / no | 30 / 25 / 30 | 8 / 6 / 14 |
+| 09 PERFORM VARYING | COBOL | no / no / no | no / no / no | 30 / 30 / 30 | 15 / 26 / 27 |
+| 10 rename across files | C | **yes** / **yes** / **yes** | yes / yes / yes | 19 / 17 / 15 | 0 / 0 / 0 |
+
+| Seed | Passed | Valid calls | Executed OK | Finished | Turns | Wall time | Tokens (prompt / output) |
+|---|---|---|---|---|---|---|---|
+| 42 | 7/10 | 200/200 (100%) | 144/200 (72%) | 7/10 | 200 | 4.0 min | 660,383 / 18,731 |
+| 1 | 7/10 | 188/188 (100%) | 109/188 (58%) | 7/10 | 188 | 4.2 min | 618,571 / 19,593 |
+| 2 | 8/10 | 171/171 (100%) | 121/171 (71%) | 8/10 | 171 | 3.8 min | 561,227 / 17,910 |
+
+**Totals: 22/30 passed (7, 7 and 8 of 10). 100% valid tool calls (559 of 559), all parsed natively. 67% executed without error (374 of 559).** Every seed meets the go/no-go, but only just. **Ollama is a marginal go.**
+
+What it shows:
+
+- **With the Modelfile as it was, Ollama got 0 tool calls.** The template rendered calls in the old `[TOOL_CALLS][{"name":…}]` form. Ollama builds its tool-call parser from that rendering, while Devstral-Small-2507 writes `[TOOL_CALLS]name[ARGS]{…}`. Ollama returned the text with no `tool_calls` ([report](results/gov-10-devstral-gpu/ollama-q4km/old-template/)). The template also listed the tools only while a user message was among the last two, so they dropped out after the first tool result. The Modelfile now renders the v11 form and lists the tools before the last user message.
+  - **Structure matters as well as text.** On Ollama v0.40.16, calls were parsed only with the `range .ToolCalls` inside `if .ToolCalls`. A bare `range` rendered the same prompt and parsed nothing.
+  - The fixed template was checked on a streamed reply too, since `govcode run` streams.
+  - The fix changes the manifest digest, so staging must be re-run.
+- **Same weights as llama.cpp, clearly lower scores, and the cause is not established.** llama.cpp passed 27/30 with 79% executed without error. Ollama passed 22/30 with 67%. The losses are concentrated in 09 (failed on every seed, 68 failed executions) and 04 (failed twice).
+  - **Ruled out:** offload (all layers on the GPU), context (32k, f16 KV) and repeat penalty (1.0 on both). Sampler defaults differ slightly (top_p 0.9 against 0.95, min_p 0 against 0.05) but matter little at temperature 0.15.
+  - **Not compared:** how each server renders the prompt. Ollama's tool-list placement, tool-result framing and `{{ $.Tools }}` serialization differ from llama.cpp's Jinja template.
+- **Recommendation:** serve Devstral with llama.cpp or vLLM until the Ollama gap is understood. Ollama works, but it has the least margin.
+
 ## Still to measure
 
 - Qwen3-Coder-30B-A3B. It is CN-origin and runs only where the AO has granted an exception, so it was not run.
-- The Ollama and vLLM backends for Devstral, which come with the GOV-9 staging work.
+- The vLLM backend for Devstral, which comes with the GOV-9 staging work.
+- Why Ollama scores below llama.cpp on the same GGUF: compare the rendered prompts.
 - An air-gapped GPU run on the RHEL target host (GOV-39).
