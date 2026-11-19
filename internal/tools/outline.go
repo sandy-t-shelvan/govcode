@@ -89,6 +89,10 @@ func (t *outline) Run(_ context.Context, a map[string]any) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// Definition names are file content: read_file rules apply as well.
+	if err := t.e.authorize("read_file", t.e.Jail.Rel(abs)); err != nil {
+		return "", err
+	}
 	if err := t.e.authorize("outline", t.e.Jail.Rel(abs)); err != nil {
 		return "", err
 	}

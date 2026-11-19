@@ -28,7 +28,8 @@
 
 ### 2a. Permission rules (`permissions` in policy)
 - Rules such as `run_command(make *)`, `edit_file(src/**)` or `read_file(keys/**)`, in `allow`, `ask` and `deny` lists. Deny beats ask, and ask beats allow. With no matching rule, commands ask and other tools are allowed (the jail still applies).
-- Every file and command tool checks the rules itself, so no caller can skip them. Denied paths are also removed from `list_files` and `search` results. An allowed command containing shell metacharacters is downgraded to ask.
+- Every file and command tool checks the rules itself, so no caller can skip them. An allowed command containing shell metacharacters is downgraded to ask.
+- `read_file(...)` rules protect a file's content in **every** tool that shows it, not only `read_file`: `outline` (definition names), `edit_file` (its result is a diff with context lines) and `search` must pass the `read_file` rule as well as their own. `list_files` and `search` leave out paths that `read_file` would refuse (deny, or ask with no human attached).
 - `ask` needs a human at the terminal or in the editor. With no human attached (`--non-interactive`, CI), ask becomes deny. Every decision is audit-logged with the rule that matched.
 
 ### 2b. Spillage guard (classification above the repository's level)
@@ -144,4 +145,5 @@ See [SUPPLY_CHAIN.md](SUPPLY_CHAIN.md). In strict mode the binary refuses to sta
 4. **The sandbox depends on the kernel.** Without unprivileged user namespaces, `sandbox.mode: required` refuses to run, which is correct. `best-effort` falls back to running commands unsandboxed and records `sandbox=none` in the audit log.
 5. **The model can be wrong.** The approval step is the control. The test gate and the diff review reduce risk but do not replace code review.
 6. **Root is trusted.** A malicious administrator can remove `chattr +a`, replace the binary, or edit the keyring. That is out of scope for an application and in scope for your host controls.
-7. **Regulatory mapping.** The attribution and provenance requirement you cited (DoWI 8430.01) has not been mapped clause by clause here. The controls above produce the evidence: who requested, what the model did, when, who approved, and a tamper-evident record. Have your compliance reviewer map them to the instruction's exact text.
+7. **Commands can read rule-protected files.** `read_file(...)` rules govern govcode's file tools, not programs run by `run_command`. The sandbox mounts the whole worktree, so an allowed or approved command (for example a `make` recipe) can read a file that `read_file` denies. Keep files the agent must never see out of the repository, and keep the command allowlist narrow.
+8. **Regulatory mapping.** The attribution and provenance requirement you cited (DoWI 8430.01) has not been mapped clause by clause here. The controls above produce the evidence: who requested, what the model did, when, who approved, and a tamper-evident record. Have your compliance reviewer map them to the instruction's exact text.
