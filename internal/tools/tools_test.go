@@ -202,7 +202,7 @@ func TestAllowlistCannotBeChained(t *testing.T) {
 func TestSandboxIsolation(t *testing.T) {
 	e := repo(t, map[string]string{"a": "x"})
 	if !e.Runner.Sandboxed() {
-		t.Skip("bubblewrap unavailable")
+		skipNoBwrap(t)
 	}
 	home, _ := os.UserHomeDir()
 	secret := filepath.Join(t.TempDir(), "secret")

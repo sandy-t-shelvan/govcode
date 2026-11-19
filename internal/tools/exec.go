@@ -35,14 +35,19 @@ type Runner struct {
 	Env       []string // KEY=VALUE passed into the sandbox
 	MaxOutput int
 	// Hide reports whether a worktree file (repo-relative, '/'-separated)
-	// must be hidden from commands; such files are masked to an empty,
-	// read-only file. Nil hides nothing.
+	// must be hidden from commands. A directory covered as a whole becomes an
+	// empty read-only tmpfs; any other such file is bound to /dev/null on a
+	// nodev mount, so opening it fails (Permission denied). Nil hides nothing.
 	Hide func(rel string) bool
 	// HideGit hides the repository's git data (object store and the
 	// worktree's .git), so history cannot reveal hidden files.
 	HideGit bool
-	bwrap   string
-	shell   string
+	// Cover lists host paths that must not be readable while hiding, such
+	// as govcode's state directory (other runs' worktrees, the audit log),
+	// in case a read-only bind (/opt, extra_ro_paths) would expose them.
+	Cover []string
+	bwrap string
+	shell string
 	// maskOK: this bwrap supports --args and --remount-ro, which hiding
 	// needs. Without them commands still run, but nothing can be hidden.
 	maskOK bool
@@ -134,7 +139,7 @@ func (r *Runner) RunWith(ctx context.Context, command string, timeout time.Durat
 		// hiding, cover those with an empty tmpfs; the worktree bind below
 		// still applies on top.
 		if plan.count > 0 || r.HideGit {
-			for _, p := range r.repoPaths() {
+			for _, p := range append(r.repoPaths(), r.Cover...) {
 				if SandboxVisible(p, r.ExtraRO) {
 					args = append(args, "--tmpfs", p)
 				}

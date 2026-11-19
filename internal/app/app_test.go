@@ -535,7 +535,7 @@ func TestRunHidesReadProtectedFilesFromCommands(t *testing.T) {
 	}
 	probe, perr := tools.NewRunner(tools.SandboxBestEffort, a.Repo.Root, nil, nil)
 	if perr != nil || !probe.Sandboxed() {
-		t.Skip("bubblewrap not available")
+		skipNoBwrap(t)
 	}
 	root := a.Repo.Root
 	os.MkdirAll(filepath.Join(root, "keys"), 0o755)
@@ -580,7 +580,7 @@ func TestChangeToHiddenFileBlocksChecks(t *testing.T) {
 	}
 	probe, _ := tools.NewRunner(tools.SandboxBestEffort, a.Repo.Root, nil, nil)
 	if probe == nil || !probe.Sandboxed() {
-		t.Skip("bubblewrap not available")
+		skipNoBwrap(t)
 	}
 	create, _ := json.Marshal(map[string]any{"path": "keys/new.h", "content": "int planted;\n"})
 	be := &llm.Scripted{Responses: []llm.Response{
@@ -620,4 +620,15 @@ func TestPreflightReportsSandboxHiding(t *testing.T) {
 		}
 	}
 	t.Fatal("no sandbox hiding check with read rules in the policy")
+}
+
+// skipNoBwrap skips a sandbox test when bubblewrap is unusable, unless
+// GOVCODE_REQUIRE_BWRAP=1 (set in CI), where a skip would turn the
+// sandbox security tests into silent no-ops: then it fails instead.
+func skipNoBwrap(t *testing.T) {
+	t.Helper()
+	if os.Getenv("GOVCODE_REQUIRE_BWRAP") == "1" {
+		t.Fatal("bubblewrap is not usable here, but GOVCODE_REQUIRE_BWRAP=1 requires the sandbox tests to run")
+	}
+	t.Skip("bubblewrap not available")
 }

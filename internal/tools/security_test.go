@@ -425,7 +425,7 @@ func TestSandboxHidesReadProtectedFiles(t *testing.T) {
 	newEnv := func(t *testing.T) *Env {
 		e := repo(t, map[string]string{"keys/creds.h": secret, "src/ok.c": "int ok_fn(void) { return 1; }\n"})
 		if !e.Runner.Sandboxed() {
-			t.Skip("bubblewrap not available")
+			skipNoBwrap(t)
 		}
 		return e
 	}
@@ -495,6 +495,25 @@ func TestSandboxHidesReadProtectedFiles(t *testing.T) {
 		}
 		if res := r.Run(context.Background(), "cat src/ok.c", 30*time.Second); !strings.Contains(res.Output, "ok_fn") {
 			t.Fatalf("worktree hidden along with the main repository: %+v", res)
+		}
+	})
+
+	// govcode's state directory (other runs' worktrees, the audit log) may
+	// also sit under a read-only bind; it is covered while hiding.
+	t.Run("state directory under a read-only bind stays hidden", func(t *testing.T) {
+		e := newEnv(t)
+		state := t.TempDir()
+		os.MkdirAll(filepath.Join(state, "worktrees", "old", "keys"), 0o755)
+		os.WriteFile(filepath.Join(state, "worktrees", "old", "keys", "creds.h"), []byte(secret), 0o644)
+		os.WriteFile(filepath.Join(state, "audit.jsonl"), []byte("4242 audit\n"), 0o644)
+		r, err := NewRunner(SandboxBestEffort, e.Jail.Root, []string{state}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.HideReadProtected(deny, nil, false)
+		r.Cover = []string{state}
+		if res := r.Run(context.Background(), "cat "+state+"/worktrees/old/keys/creds.h "+state+"/audit.jsonl", 30*time.Second); strings.Contains(res.Output, "4242") {
+			t.Fatalf("state directory readable through a read-only bind:\n%s", res.Output)
 		}
 	})
 
@@ -578,7 +597,7 @@ func TestSandboxManyMasksFitArgLimit(t *testing.T) {
 	}
 	e := repo(t, files)
 	if !e.Runner.Sandboxed() {
-		t.Skip("bubblewrap not available")
+		skipNoBwrap(t)
 	}
 	deny, _ := permissions.Parse(nil, nil, []string{"read_file(big/**)"})
 	e.Runner.HideReadProtected(deny, nil, false)
@@ -594,7 +613,7 @@ func TestSandboxMaskShapes(t *testing.T) {
 	run := func(e *Env, c string) ExecResult { return e.Runner.Run(context.Background(), c, 60*time.Second) }
 	sandboxed := func(t *testing.T, e *Env) {
 		if !e.Runner.Sandboxed() {
-			t.Skip("bubblewrap not available")
+			skipNoBwrap(t)
 		}
 	}
 	t.Run("whole protected directory hides names and refuses writes", func(t *testing.T) {
@@ -614,8 +633,8 @@ func TestSandboxMaskShapes(t *testing.T) {
 		sandboxed(t, e)
 		deny, _ := permissions.Parse(nil, nil, []string{"read_file(**/*.pem)"})
 		e.Runner.HideReadProtected(deny, nil, false)
-		if r := run(e, "cat certs/a.pem"); strings.Contains(r.Output, "4242") {
-			t.Fatalf("protected .pem readable:\n%s", r.Output)
+		if r := run(e, "cat certs/a.pem"); strings.Contains(r.Output, "4242") || r.ExitCode == 0 || !strings.Contains(r.Output, "Permission denied") {
+			t.Fatalf("a per-file mask must make reads fail: %+v", r)
 		}
 		if r := run(e, "echo x > certs/new.crt && ls certs"); r.ExitCode != 0 || !strings.Contains(r.Output, "a.pem") {
 			t.Fatalf("certs/ was masked whole: %+v", r)
@@ -668,4 +687,15 @@ func TestScrubSetupError(t *testing.T) {
 	if out := "build ok\nbwrap: not at start\n"; scrubSetupError(out, true) != out {
 		t.Fatal("command output that merely mentions bwrap was replaced")
 	}
+}
+
+// skipNoBwrap skips a sandbox test when bubblewrap is unusable, unless
+// GOVCODE_REQUIRE_BWRAP=1 (set in CI), where a skip would turn the
+// sandbox security tests into silent no-ops: then it fails instead.
+func skipNoBwrap(t *testing.T) {
+	t.Helper()
+	if os.Getenv("GOVCODE_REQUIRE_BWRAP") == "1" {
+		t.Fatal("bubblewrap is not usable here, but GOVCODE_REQUIRE_BWRAP=1 requires the sandbox tests to run")
+	}
+	t.Skip("bubblewrap not available")
 }

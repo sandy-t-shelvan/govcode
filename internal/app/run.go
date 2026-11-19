@@ -193,6 +193,9 @@ func (a *App) execute(ctx context.Context, o RunOptions, st *runstate.State, bac
 	// read_file may not: files read rules deny or ask for are masked in the
 	// sandbox, and git history is hidden while any read rule exists.
 	runner.HideReadProtected(rules, p.Sandbox.Expose, p.Sandbox.ExposeGit)
+	if sd, err := filepath.Abs(p.StateDir); err == nil {
+		runner.Cover = []string{sd}
+	}
 	jail, err := tools.NewJail(wt)
 	if err != nil {
 		return nil, err

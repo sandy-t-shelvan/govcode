@@ -36,7 +36,7 @@ func TestPostEditHookFailureReported(t *testing.T) {
 func TestHookRunsInSandbox(t *testing.T) {
 	e := repo(t, map[string]string{"a.c": "x\n"})
 	if !e.Runner.Sandboxed() {
-		t.Skip("no bubblewrap")
+		skipNoBwrap(t)
 	}
 	rep := e.RunHooks(context.Background(), "pre_proposal", []string{"getent hosts example.com"}, nil)
 	if rep == "" {
