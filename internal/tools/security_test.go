@@ -231,3 +231,46 @@ func TestSearchCapsAndCountsWithoutLeaking(t *testing.T) {
 		t.Fatalf("long line not truncated: %d chars", len(lines[0]))
 	}
 }
+
+// git grep -n prefixes every hit with "path:lineno:". Portion marks and
+// banner lines are recognised only at the start of a line, so the guard has
+// to see the file text, not the prefix; otherwise search hands the model
+// markings that read_file would withhold. (Test from PR #19.)
+func TestSearchSpillageIgnoresLineNumberPrefix(t *testing.T) {
+	e := repo(t, map[string]string{
+		"banner.txt":  "TOP SECRET\n",
+		"portion.txt": "(TS) payload coordinates\n// (S) allowed in this repo\n",
+	})
+	e.MaxLevel = marking.S
+	out, err := call(t, NewSet(e), "search", map[string]any{"pattern": "SECRET|payload|allowed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "TOP SECRET") || strings.Contains(out, "payload") {
+		t.Fatalf("search leaked markings above the repository level:\n%s", out)
+	}
+	if !strings.Contains(out, "withheld") || !strings.Contains(out, "portion.txt:2:// (S) allowed in this repo") {
+		t.Fatalf("search dropped a permitted line or the withhold notice:\n%s", out)
+	}
+}
+
+// A path containing ':' must not shift the line-number field: the hit keeps
+// its real path (so deny rules match it) and the marking is still caught.
+func TestSearchPathWithColons(t *testing.T) {
+	e := repo(t, map[string]string{
+		"a:1:b.txt":      "TOP SECRET\nok line\n",
+		"keys/x:2:y.txt": "ok line\n",
+	})
+	e.MaxLevel = marking.S
+	e.Perms, _ = permissions.Parse(nil, nil, []string{"read_file(keys/**)"})
+	out, err := call(t, NewSet(e), "search", map[string]any{"pattern": "SECRET|ok"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "TOP SECRET") || strings.Contains(out, "keys/") {
+		t.Fatalf("colon path leaked:\n%s", out)
+	}
+	if !strings.Contains(out, "a:1:b.txt:2:ok line") || !strings.Contains(out, "withheld") {
+		t.Fatalf("colon path hit missing or misparsed:\n%s", out)
+	}
+}
