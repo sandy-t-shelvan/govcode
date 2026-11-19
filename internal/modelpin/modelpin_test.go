@@ -50,6 +50,43 @@ func TestVerifyArtifacts(t *testing.T) {
 	}
 }
 
+func TestVerifyUpstream(t *testing.T) {
+	dir := t.TempDir()
+	m := &Model{ID: "dev", Upstream: Source{Files: []File{
+		{Path: "config.json"}, {Path: "model-00001.safetensors"},
+	}}}
+	// No weights/<id>/ directory: a GGUF-only staging, nothing to check.
+	if p := VerifyUpstream(m, dir, nil); len(p) != 0 {
+		t.Fatalf("absent upstream dir reported: %v", p)
+	}
+	sub := filepath.Join(dir, "weights", "dev")
+	os.MkdirAll(sub, 0o755)
+	os.WriteFile(filepath.Join(sub, "config.json"), []byte(`{"a":1}`), 0o644)
+	// safetensors: 8-byte little-endian header length, then a JSON header.
+	st := append([]byte{2, 0, 0, 0, 0, 0, 0, 0}, []byte("{}")...)
+	os.WriteFile(filepath.Join(sub, "model-00001.safetensors"), st, 0o644)
+	for i := range m.Upstream.Files {
+		m.Upstream.Files[i].SHA256, _, _ = HashFile(filepath.Join(sub, m.Upstream.Files[i].Path))
+	}
+	if p := VerifyUpstream(m, dir, nil); len(p) != 0 {
+		t.Fatalf("good upstream failed: %v", p)
+	}
+	os.WriteFile(filepath.Join(sub, "config.json"), []byte(`{"a":2}`), 0o644)
+	if p := VerifyUpstream(m, dir, nil); len(p) != 1 {
+		t.Fatalf("tampered config: %v", p)
+	}
+	os.Remove(filepath.Join(sub, "config.json"))
+	if p := VerifyUpstream(m, dir, nil); len(p) != 1 {
+		t.Fatal("missing upstream file passed")
+	}
+	os.WriteFile(filepath.Join(sub, "model-00001.safetensors"), []byte("\x80\x04pickle"), 0o644)
+	m.Upstream.Files = m.Upstream.Files[1:]
+	m.Upstream.Files[0].SHA256, _, _ = HashFile(filepath.Join(sub, "model-00001.safetensors"))
+	if p := VerifyUpstream(m, dir, nil); len(p) != 1 {
+		t.Fatal("non-safetensors content under a .safetensors name passed")
+	}
+}
+
 func TestVerifyArtifactsChatTemplate(t *testing.T) {
 	dir := t.TempDir()
 	w := filepath.Join(dir, "weights")

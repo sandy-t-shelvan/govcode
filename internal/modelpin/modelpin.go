@@ -161,6 +161,25 @@ func VerifyArtifacts(m *Model, dir string, progress func(string)) []Problem {
 	return probs
 }
 
+// VerifyUpstream checks the first-party upstream files staged for serving
+// directly (vLLM loads safetensors from dir/weights/<model id>/). If that
+// directory is absent nothing is checked: GGUF-only stagings do not carry
+// upstream weights. If it is present, every upstream file in the lock must be
+// there and match, so a server never loads an unpinned shard or config.
+func VerifyUpstream(m *Model, dir string, progress func(string)) []Problem {
+	sub := filepath.Join(dir, "weights", m.ID)
+	if fi, err := os.Stat(sub); err != nil || !fi.IsDir() {
+		return nil
+	}
+	var probs []Problem
+	for _, f := range m.Upstream.Files {
+		f.Path = filepath.Join(m.ID, f.Path)
+		ext := strings.ToLower(filepath.Ext(f.Path))
+		probs = append(probs, verifyFile(dir, f, ext == ".safetensors" || ext == ".gguf", progress)...)
+	}
+	return probs
+}
+
 // verifyFile checks one staged file under dir/weights against the lock.
 // Weight files must also be GGUF or safetensors by content; a chat template
 // is text, so that check is skipped for it.

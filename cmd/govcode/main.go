@@ -700,7 +700,9 @@ func cmdModel(ctx context.Context, args []string) error {
 			return err
 		}
 		probs := m.CheckFormats()
-		probs = append(probs, modelpin.VerifyArtifacts(m, *dir, func(p string) { fmt.Println("hashing", p) })...)
+		hashing := func(p string) { fmt.Println("hashing", p) }
+		probs = append(probs, modelpin.VerifyArtifacts(m, *dir, hashing)...)
+		probs = append(probs, modelpin.VerifyUpstream(m, *dir, hashing)...)
 		if s := m.StagingScan; s == nil {
 			fmt.Println("  WARN no staging malware scan recorded in the lock")
 		} else if s.Result != "clean" {
