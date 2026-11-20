@@ -76,6 +76,41 @@ func TestMistralV11(t *testing.T) {
 	}
 }
 
+// Captured from Devstral-Small-2507 Q4_K_M on Ollama v0.40.16 with the old
+// Modelfile template (GOV-10): Ollama dropped [ARGS] and parsed no call.
+func TestMistralV11WithoutArgsMarker(t *testing.T) {
+	in := `[TOOL_CALLS]read_file{"path":"main.c"}`
+	calls, rest := ExtractToolCalls(in, testTools)
+	if len(calls) != 1 || calls[0].Name != "read_file" || calls[0].Source != SourceMistral || args(t, calls[0])["path"] != "main.c" || rest != "" {
+		t.Fatalf("got %+v rest=%q", calls, rest)
+	}
+	// Without [ARGS] an unknown name is not a call.
+	if calls, _ := ExtractToolCalls(`[TOOL_CALLS]config{"debug":true}`, testTools); len(calls) != 0 {
+		t.Fatalf("unknown tool without [ARGS] accepted: %+v", calls)
+	}
+	// With [ARGS] the marker itself is explicit, as before.
+	if calls, _ := ExtractToolCalls(`[TOOL_CALLS]other_tool[ARGS]{"a":1}`, testTools); len(calls) != 1 {
+		t.Fatalf("explicit [ARGS] call dropped: %+v", calls)
+	}
+}
+
+func TestMistralV11BackToBack(t *testing.T) {
+	in := `[TOOL_CALLS]read_file[ARGS]{"path":"a.c"}[TOOL_CALLS]read_file[ARGS]{"path":"b.c"}[TOOL_CALLS]outline[ARGS]{"path":"c.c"}</s>`
+	calls, _ := ExtractToolCalls(in, testTools)
+	if len(calls) != 3 || args(t, calls[1])["path"] != "b.c" || args(t, calls[2])["path"] != "c.c" {
+		t.Fatalf("want 3 calls, got %+v", calls)
+	}
+}
+
+// An unknown name without [ARGS] must not swallow a real call after it.
+func TestMistralV11UnknownBeforeReal(t *testing.T) {
+	in := `[TOOL_CALLS]config{"x":1} then [TOOL_CALLS]read_file[ARGS]{"path":"a.c"}`
+	calls, _ := ExtractToolCalls(in, testTools)
+	if len(calls) != 1 || calls[0].Name != "read_file" || args(t, calls[0])["path"] != "a.c" {
+		t.Fatalf("got %+v", calls)
+	}
+}
+
 func TestJSONFenceOnlyKnownTools(t *testing.T) {
 	in := "Example config:\n```json\n{\"name\": \"server\", \"arguments\": {}}\n```\nNow:\n```json\n{\"name\": \"read_file\", \"arguments\": {\"path\": \"a.c\"}}\n```"
 	calls, _ := ExtractToolCalls(in, testTools)

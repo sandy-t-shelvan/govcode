@@ -1,0 +1,12 @@
+# govcode eval: govcode-devstral:24b-q4km
+
+- num_ctx: 32768
+- started: 2026-11-19T22:55:44Z
+- **tasks passed: 0/1**
+- **valid tool calls: -** (0/0)
+- executed without error: -
+- parse path: 
+
+| task | lang | pass | finished | turns | calls | valid | exec err | no-call | stop |
+|---|---|---|---|---|---|---|---|---|---|
+| 01-c-buffer-overflow | C | false | false | 4 | 0 | - | 0 | 4 | no_tool_call |

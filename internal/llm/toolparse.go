@@ -138,20 +138,33 @@ func parseHermes(s string, known map[string]ToolSpec) ([]ToolCall, string) {
 	return calls, strings.TrimSpace(reToolCall.ReplaceAllString(s, ""))
 }
 
-var reMistralV11 = regexp.MustCompile(`(?s)\[TOOL_CALLS\]\s*([A-Za-z0-9_\-]+)\s*\[ARGS\]\s*(\{.*?\})\s*(?:$|\[TOOL_CALLS\]|</s>)`)
+// One v11 call per [TOOL_CALLS] segment: name, then [ARGS], then a JSON object.
+// [ARGS] is optional: Ollama strips it as a control token but can leave
+// [TOOL_CALLS] in the text (captured from Devstral-Small-2507 on Ollama
+// v0.40.16, GOV-10). Without [ARGS] the name must be a known tool.
+// Splitting on the marker first keeps one call's match from running into
+// the next, so back-to-back calls are all returned.
+var reMistralV11Seg = regexp.MustCompile(`(?s)^\s*([A-Za-z0-9_\-]+)\s*(\[ARGS\])?\s*(\{.*\})\s*(?:</s>)?\s*$`)
 
 func parseMistral(s string, known map[string]ToolSpec) ([]ToolCall, string) {
 	idx := strings.Index(s, "[TOOL_CALLS]")
 	if idx < 0 {
 		return nil, s
 	}
-	// Newer tokenizer format: [TOOL_CALLS]name[ARGS]{...}
-	if ms := reMistralV11.FindAllStringSubmatch(s, -1); len(ms) > 0 {
-		var calls []ToolCall
-		for _, m := range ms {
-			calls = append(calls, ToolCall{Name: m[1], Args: normalizeArgs(json.RawMessage(m[2])), Source: SourceMistral})
+	// Newer tokenizer format: [TOOL_CALLS]name[ARGS]{...}[TOOL_CALLS]...
+	var v11 []ToolCall
+	for _, seg := range strings.Split(s[idx+len("[TOOL_CALLS]"):], "[TOOL_CALLS]") {
+		m := reMistralV11Seg.FindStringSubmatch(seg)
+		if m == nil {
+			continue
 		}
-		return calls, strings.TrimSpace(s[:idx])
+		if _, ok := known[m[1]]; m[2] == "" && !ok {
+			continue
+		}
+		v11 = append(v11, ToolCall{Name: m[1], Args: normalizeArgs(json.RawMessage(m[3])), Source: SourceMistral})
+	}
+	if len(v11) > 0 {
+		return v11, strings.TrimSpace(s[:idx])
 	}
 	payload := RepairJSON(strings.TrimSpace(s[idx+len("[TOOL_CALLS]"):]))
 	var arr []nameArgs

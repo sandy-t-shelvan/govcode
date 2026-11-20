@@ -1,0 +1,52 @@
+{
+  "model": "devstral-small-24b",
+  "num_ctx": 32768,
+  "started": "2026-11-19T22:05:04Z",
+  "results": [
+    {
+      "id": "01-c-buffer-overflow",
+      "language": "C",
+      "title": "Unbounded strcpy overruns callsign buffer",
+      "passed": false,
+      "check_output": "FAIL truncation: 'LONGCALL'\nmake: *** [Makefile:4: test] Error 1\n",
+      "metrics": {
+        "turns": 4,
+        "calls_emitted": 0,
+        "parsed_by": {},
+        "unknown_tool": 0,
+        "schema_invalid": 0,
+        "exec_ok": 0,
+        "exec_error": 0,
+        "no_call_turns": 4,
+        "context_trims": 0,
+        "prompt_tokens": 3553,
+        "completion_tokens": 647,
+        "model_time_ns": 7687786726,
+        "finished": false,
+        "stop_reason": "no_tool_call"
+      },
+      "valid_call_rate": 0,
+      "changed": null,
+      "duration_s": 7.735626492
+    }
+  ],
+  "totals": {
+    "tasks": 1,
+    "run": 1,
+    "passed": 0,
+    "calls_emitted": 0,
+    "valid_calls": 0,
+    "exec_ok": 0,
+    "exec_error": 0,
+    "unknown_tool": 0,
+    "schema_invalid": 0,
+    "no_call_turns": 4,
+    "turns": 4,
+    "parsed_by": {},
+    "finished": 0,
+    "prompt_tokens": 3553,
+    "output_tokens": 647,
+    "model_seconds": 7.687786726
+  },
+  "complete": true
+}

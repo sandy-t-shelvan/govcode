@@ -1,0 +1,87 @@
+{
+  "model": "devstral-small-24b",
+  "num_ctx": 32768,
+  "started": "2026-11-20T19:27:36Z",
+  "results": [
+    {
+      "id": "04-cpp-auto-ptr",
+      "language": "C++",
+      "title": "Port std::auto_ptr to C++17",
+      "passed": true,
+      "check_output": "ok\n",
+      "metrics": {
+        "turns": 13,
+        "calls_emitted": 13,
+        "parsed_by": {
+          "native": 13
+        },
+        "unknown_tool": 0,
+        "schema_invalid": 0,
+        "exec_ok": 13,
+        "exec_error": 0,
+        "no_call_turns": 0,
+        "context_trims": 0,
+        "prompt_tokens": 33741,
+        "completion_tokens": 671,
+        "model_time_ns": 9335367882,
+        "finished": true,
+        "stop_reason": "finished"
+      },
+      "valid_call_rate": 1,
+      "changed": [
+        "sensor_bus.h",
+        "sensor_bus.cpp"
+      ],
+      "duration_s": 9.707248142
+    },
+    {
+      "id": "09-cobol-perform-varying",
+      "language": "COBOL",
+      "title": "Annual total skips December",
+      "passed": false,
+      "check_output": "\u003ccommand-line\u003e: warning: \"_FORTIFY_SOURCE\" redefined\n\u003ccommand-line\u003e: note: this is the location of the previous definition\nANNUAL=   6600.00\nmake: *** [Makefile:2: test] Error 1\n",
+      "metrics": {
+        "turns": 30,
+        "calls_emitted": 30,
+        "parsed_by": {
+          "native": 30
+        },
+        "unknown_tool": 0,
+        "schema_invalid": 0,
+        "exec_ok": 15,
+        "exec_error": 15,
+        "no_call_turns": 0,
+        "context_trims": 0,
+        "prompt_tokens": 163845,
+        "completion_tokens": 2360,
+        "model_time_ns": 33885750564,
+        "finished": false,
+        "stop_reason": "max_turns"
+      },
+      "valid_call_rate": 1,
+      "changed": null,
+      "duration_s": 33.97858537
+    }
+  ],
+  "totals": {
+    "tasks": 2,
+    "run": 2,
+    "passed": 1,
+    "calls_emitted": 43,
+    "valid_calls": 43,
+    "exec_ok": 28,
+    "exec_error": 15,
+    "unknown_tool": 0,
+    "schema_invalid": 0,
+    "no_call_turns": 0,
+    "turns": 43,
+    "parsed_by": {
+      "native": 43
+    },
+    "finished": 1,
+    "prompt_tokens": 197586,
+    "output_tokens": 3031,
+    "model_seconds": 43.221118446
+  },
+  "complete": true
+}

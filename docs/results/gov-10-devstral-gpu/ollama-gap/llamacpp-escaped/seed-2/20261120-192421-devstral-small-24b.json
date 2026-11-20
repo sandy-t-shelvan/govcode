@@ -1,0 +1,89 @@
+{
+  "model": "devstral-small-24b",
+  "num_ctx": 32768,
+  "started": "2026-11-20T19:23:54Z",
+  "results": [
+    {
+      "id": "04-cpp-auto-ptr",
+      "language": "C++",
+      "title": "Port std::auto_ptr to C++17",
+      "passed": false,
+      "check_output": "sensor_bus.cpp: In member function ‘void SensorBus::attach(Sensor*)’:\nsensor_bus.cpp:10:28: error: use of deleted function ‘std::unique_ptr\u003c_Tp, _Dp\u003e\u0026 std::unique_ptr\u003c_Tp, _Dp\u003e::operator=(const std::unique_ptr\u003c_Tp, _Dp\u003e\u0026) [with _Tp = Sensor; _Dp = std::default_delete\u003cSensor\u003e]’\n   10 |         slots_[count_++] = p;\n      |                            ^\nIn file included from /usr/include/c++/13/memory:78,\n                 from sensor_bus.h:3,\n                 from sensor_bus.cpp:2:\n/usr/include/c++/13/bits/unique_ptr.h:523:19: note: declared here\n  523 |       unique_ptr\u0026 operator=(const unique_ptr\u0026) = delete;\n      |                   ^~~~~~~~\nmake: *** [Makefile:7: test_04] Error 1\n",
+      "metrics": {
+        "turns": 30,
+        "calls_emitted": 30,
+        "parsed_by": {
+          "native": 30
+        },
+        "unknown_tool": 0,
+        "schema_invalid": 0,
+        "exec_ok": 8,
+        "exec_error": 22,
+        "no_call_turns": 0,
+        "context_trims": 0,
+        "prompt_tokens": 115133,
+        "completion_tokens": 1970,
+        "model_time_ns": 27017450744,
+        "finished": false,
+        "stop_reason": "max_turns"
+      },
+      "valid_call_rate": 1,
+      "changed": [
+        "sensor_bus.h",
+        "sensor_bus.cpp"
+      ],
+      "duration_s": 27.338223681
+    },
+    {
+      "id": "09-cobol-perform-varying",
+      "language": "COBOL",
+      "title": "Annual total skips December",
+      "passed": true,
+      "check_output": "ANNUAL=   7800.00\n",
+      "metrics": {
+        "turns": 14,
+        "calls_emitted": 14,
+        "parsed_by": {
+          "native": 14
+        },
+        "unknown_tool": 0,
+        "schema_invalid": 0,
+        "exec_ok": 10,
+        "exec_error": 4,
+        "no_call_turns": 0,
+        "context_trims": 0,
+        "prompt_tokens": 40464,
+        "completion_tokens": 1258,
+        "model_time_ns": 17450748986,
+        "finished": true,
+        "stop_reason": "finished"
+      },
+      "valid_call_rate": 1,
+      "changed": [
+        "ANNUAL.cbl"
+      ],
+      "duration_s": 17.548930753
+    }
+  ],
+  "totals": {
+    "tasks": 2,
+    "run": 2,
+    "passed": 1,
+    "calls_emitted": 44,
+    "valid_calls": 44,
+    "exec_ok": 18,
+    "exec_error": 26,
+    "unknown_tool": 0,
+    "schema_invalid": 0,
+    "no_call_turns": 0,
+    "turns": 44,
+    "parsed_by": {
+      "native": 44
+    },
+    "finished": 1,
+    "prompt_tokens": 155597,
+    "output_tokens": 3228,
+    "model_seconds": 44.46819973
+  },
+  "complete": true
+}

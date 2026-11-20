@@ -1,0 +1,35 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"regexp"
+
+	"github.com/ollama/ollama/api"
+	"github.com/ollama/ollama/template"
+)
+
+// usage: ollrender <Modelfile> <chat-request.json>  -> rendered prompt on stdout
+func main() {
+	mf, err := os.ReadFile(os.Args[1])
+	must(err)
+	m := regexp.MustCompile(`(?s)TEMPLATE """(.*?)"""`).FindSubmatch(mf)
+	if m == nil {
+		panic("no TEMPLATE")
+	}
+	tmpl, err := template.Parse(string(m[1]))
+	must(err)
+	var req api.ChatRequest
+	b, err := os.ReadFile(os.Args[2])
+	must(err)
+	must(json.Unmarshal(b, &req))
+	must(tmpl.Execute(os.Stdout, template.Values{Messages: req.Messages, Tools: req.Tools}))
+}
+
+func must(err error) {
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}

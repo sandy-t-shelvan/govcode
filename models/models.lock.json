@@ -127,7 +127,13 @@
         "max_tokens": 4096,
         "temperature": 0.15,
         "vllm_tool_call_parser": "mistral",
-        "ollama_manifest_digest": "FILL_AT_STAGING"
+        "ollama_manifest_digest": "FILL_AT_STAGING",
+        "llamacpp_chat_template": {
+          "path": "devstral-small-24b.chat_template.jinja",
+          "size": 9838,
+          "sha256": "039a4710e2aabaa79e85a233fa3daa4fbc030a4a8dc218cb7f34fb0c4b8c13b1",
+          "source": "ggml-org/llama.cpp@a06044b934db085e373286444e0c15b93635a20c:models/templates/unsloth-mistral-Devstral-Small-2507.jinja"
+        }
       }
     },
     {
