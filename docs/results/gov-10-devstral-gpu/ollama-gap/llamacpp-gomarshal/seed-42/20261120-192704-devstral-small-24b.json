@@ -1,0 +1,90 @@
+{
+  "model": "devstral-small-24b",
+  "num_ctx": 32768,
+  "started": "2026-11-20T19:26:56Z",
+  "results": [
+    {
+      "id": "04-cpp-auto-ptr",
+      "language": "C++",
+      "title": "Port std::auto_ptr to C++17",
+      "passed": true,
+      "check_output": "ok\n",
+      "metrics": {
+        "turns": 7,
+        "calls_emitted": 7,
+        "parsed_by": {
+          "native": 7
+        },
+        "unknown_tool": 0,
+        "schema_invalid": 0,
+        "exec_ok": 7,
+        "exec_error": 0,
+        "no_call_turns": 0,
+        "context_trims": 0,
+        "prompt_tokens": 15050,
+        "completion_tokens": 553,
+        "model_time_ns": 7463276998,
+        "finished": true,
+        "stop_reason": "finished"
+      },
+      "valid_call_rate": 1,
+      "changed": [
+        "sensor_bus.h",
+        "sensor_bus.cpp"
+      ],
+      "duration_s": 7.685593712
+    },
+    {
+      "id": "09-cobol-perform-varying",
+      "language": "COBOL",
+      "title": "Annual total skips December",
+      "passed": true,
+      "check_output": "ANNUAL=   7800.00\n",
+      "metrics": {
+        "turns": 22,
+        "calls_emitted": 22,
+        "parsed_by": {
+          "native": 22
+        },
+        "unknown_tool": 0,
+        "schema_invalid": 0,
+        "exec_ok": 15,
+        "exec_error": 7,
+        "no_call_turns": 0,
+        "context_trims": 0,
+        "prompt_tokens": 88882,
+        "completion_tokens": 2399,
+        "model_time_ns": 32004441276,
+        "finished": true,
+        "stop_reason": "finished"
+      },
+      "valid_call_rate": 1,
+      "changed": [
+        "ANNUAL.new.cbl",
+        "ANNUAL.cbl"
+      ],
+      "duration_s": 32.178528701
+    }
+  ],
+  "totals": {
+    "tasks": 2,
+    "run": 2,
+    "passed": 2,
+    "calls_emitted": 29,
+    "valid_calls": 29,
+    "exec_ok": 22,
+    "exec_error": 7,
+    "unknown_tool": 0,
+    "schema_invalid": 0,
+    "no_call_turns": 0,
+    "turns": 29,
+    "parsed_by": {
+      "native": 29
+    },
+    "finished": 2,
+    "prompt_tokens": 103932,
+    "output_tokens": 2952,
+    "model_seconds": 39.467718274
+  },
+  "complete": true
+}

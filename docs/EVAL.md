@@ -199,13 +199,24 @@ What it shows:
   - The fixed template was checked on a streamed reply too, since `govcode run` streams.
   - The fix changes the manifest digest, so staging must be re-run.
 - **Same weights as llama.cpp, clearly lower scores, and the cause is not established.** llama.cpp passed 27/30 with 79% executed without error. Ollama passed 22/30 with 67%. The losses are concentrated in 09 (failed on every seed, 68 failed executions) and 04 (failed twice).
-  - **Ruled out:** offload (all layers on the GPU), context (32k, f16 KV) and repeat penalty (1.0 on both). Sampler defaults differ slightly (top_p 0.9 against 0.95, min_p 0 against 0.05) but matter little at temperature 0.15.
-  - **Not compared:** how each server renders the prompt. Ollama's tool-list placement, tool-result framing and `{{ $.Tools }}` serialization differ from llama.cpp's Jinja template.
+  - **Ruled out:** offload (all layers on the GPU), context (32k, f16 KV) and repeat penalty (1.0 on both).
+  - **The prompts differ in one way that matters.** Ollama's prompt was rendered with Ollama's own `template` package (11,577 characters, the `prompt_len` its server logged) and diffed against llama.cpp's for the same conversation, task 09 at turn 12. The structure, tool placement and tool results are the same. Past tool-call arguments differ: Ollama re-encodes them with Go's `json.Marshal`, which sorts keys, drops spaces and escapes `<`, `>` and `&` as `\u003c`, `\u003e` and `\u0026`. So the model sees its own earlier COBOL edits as `UNTIL WS-I \u003e 12`. Ollama v0.40.16 cannot change this: the template `json` function escapes too, and there is no Mistral renderer. The tool list differs only in key order, whitespace and an omitted empty `required`.
+  - **That difference does not explain the gap.** llama.cpp was run with scratch templates that reproduce Ollama's encoding, on the two tasks where Ollama lost most (04 and 09), at seeds 42 / 1 / 2:
+
+    | Server and rendering of past tool calls | 04 + 09 passed |
+    |---|---|
+    | llama.cpp, pinned template (baseline) | 6/6 |
+    | llama.cpp, `<>&` escaped as Ollama does | 4/6 |
+    | llama.cpp, byte-identical to Ollama (sorted, compact, escaped) | 5/6 |
+    | Ollama | 1/6 |
+
+    The escaped runs that failed did look like Ollama's failures: 22 and 24 failed executions, ending at the turn limit. The baseline never went above 10 on these tasks. But 9 of 12 passed against Ollama's 1 of 6, so the encoding is at most a small effect. Evidence, scratch templates and the renderer are in [`results/gov-10-devstral-gpu/ollama-gap/`](results/gov-10-devstral-gpu/ollama-gap/).
+  - **Not tested:** the samplers. Ollama sends top_p 0.9 and min_p 0; llama.cpp defaults to top_p 0.95 and min_p 0.05 (`common/common.h`). The next step is an Ollama scratch model with `PARAMETER top_p 0.95` and `PARAMETER min_p 0.05` on tasks 04 and 09. Any Modelfile change replaces the pinned digest, so a fix means re-staging and re-running the full Ollama eval.
 - **Recommendation:** serve Devstral with llama.cpp or vLLM until the Ollama gap is understood. Ollama works, but it has the least margin.
 
 ## Still to measure
 
 - Qwen3-Coder-30B-A3B. It is CN-origin and runs only where the AO has granted an exception, so it was not run.
 - The vLLM backend for Devstral, which comes with the GOV-9 staging work.
-- Why Ollama scores below llama.cpp on the same GGUF: compare the rendered prompts.
+- Why Ollama scores below llama.cpp on the same GGUF. Prompt rendering is measured and is at most a small effect; the sampler settings (top_p, min_p) are next.
 - An air-gapped GPU run on the RHEL target host (GOV-39).

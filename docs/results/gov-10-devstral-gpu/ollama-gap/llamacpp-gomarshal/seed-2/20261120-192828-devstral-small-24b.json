@@ -1,0 +1,89 @@
+{
+  "model": "devstral-small-24b",
+  "num_ctx": 32768,
+  "started": "2026-11-20T19:28:20Z",
+  "results": [
+    {
+      "id": "04-cpp-auto-ptr",
+      "language": "C++",
+      "title": "Port std::auto_ptr to C++17",
+      "passed": true,
+      "check_output": "ok\n",
+      "metrics": {
+        "turns": 8,
+        "calls_emitted": 8,
+        "parsed_by": {
+          "native": 8
+        },
+        "unknown_tool": 0,
+        "schema_invalid": 0,
+        "exec_ok": 8,
+        "exec_error": 0,
+        "no_call_turns": 0,
+        "context_trims": 0,
+        "prompt_tokens": 16902,
+        "completion_tokens": 542,
+        "model_time_ns": 7725941245,
+        "finished": true,
+        "stop_reason": "finished"
+      },
+      "valid_call_rate": 1,
+      "changed": [
+        "sensor_bus.h",
+        "sensor_bus.cpp"
+      ],
+      "duration_s": 7.950174613
+    },
+    {
+      "id": "09-cobol-perform-varying",
+      "language": "COBOL",
+      "title": "Annual total skips December",
+      "passed": true,
+      "check_output": "ANNUAL=   7800.00\n",
+      "metrics": {
+        "turns": 13,
+        "calls_emitted": 13,
+        "parsed_by": {
+          "native": 13
+        },
+        "unknown_tool": 0,
+        "schema_invalid": 0,
+        "exec_ok": 9,
+        "exec_error": 4,
+        "no_call_turns": 0,
+        "context_trims": 0,
+        "prompt_tokens": 37409,
+        "completion_tokens": 1132,
+        "model_time_ns": 15465871097,
+        "finished": true,
+        "stop_reason": "finished"
+      },
+      "valid_call_rate": 1,
+      "changed": [
+        "ANNUAL.cbl"
+      ],
+      "duration_s": 15.567070165
+    }
+  ],
+  "totals": {
+    "tasks": 2,
+    "run": 2,
+    "passed": 2,
+    "calls_emitted": 21,
+    "valid_calls": 21,
+    "exec_ok": 17,
+    "exec_error": 4,
+    "unknown_tool": 0,
+    "schema_invalid": 0,
+    "no_call_turns": 0,
+    "turns": 21,
+    "parsed_by": {
+      "native": 21
+    },
+    "finished": 2,
+    "prompt_tokens": 54311,
+    "output_tokens": 1674,
+    "model_seconds": 23.191812342
+  },
+  "complete": true
+}
