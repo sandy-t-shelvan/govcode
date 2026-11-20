@@ -94,6 +94,23 @@ func TestMistralV11WithoutArgsMarker(t *testing.T) {
 	}
 }
 
+func TestMistralV11BackToBack(t *testing.T) {
+	in := `[TOOL_CALLS]read_file[ARGS]{"path":"a.c"}[TOOL_CALLS]read_file[ARGS]{"path":"b.c"}[TOOL_CALLS]outline[ARGS]{"path":"c.c"}</s>`
+	calls, _ := ExtractToolCalls(in, testTools)
+	if len(calls) != 3 || args(t, calls[1])["path"] != "b.c" || args(t, calls[2])["path"] != "c.c" {
+		t.Fatalf("want 3 calls, got %+v", calls)
+	}
+}
+
+// An unknown name without [ARGS] must not swallow a real call after it.
+func TestMistralV11UnknownBeforeReal(t *testing.T) {
+	in := `[TOOL_CALLS]config{"x":1} then [TOOL_CALLS]read_file[ARGS]{"path":"a.c"}`
+	calls, _ := ExtractToolCalls(in, testTools)
+	if len(calls) != 1 || calls[0].Name != "read_file" || args(t, calls[0])["path"] != "a.c" {
+		t.Fatalf("got %+v", calls)
+	}
+}
+
 func TestJSONFenceOnlyKnownTools(t *testing.T) {
 	in := "Example config:\n```json\n{\"name\": \"server\", \"arguments\": {}}\n```\nNow:\n```json\n{\"name\": \"read_file\", \"arguments\": {\"path\": \"a.c\"}}\n```"
 	calls, _ := ExtractToolCalls(in, testTools)

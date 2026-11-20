@@ -18,4 +18,4 @@ TMPL=$(jq -r --arg id "$ID" '.models[]|select(.id==$id)|.serve.llamacpp_chat_tem
 EXTRA=()
 [ -n "$TMPL" ] && EXTRA+=(--chat-template-file "$DIR/weights/$TMPL")
 exec llama-server -m "$DIR/weights/$GGUF" --host 127.0.0.1 --port 8080 \
-  -c "$CTX" -np 1 --jinja --no-webui -a "$ID" "${EXTRA[@]}" "$@"
+  -c "$CTX" -np 1 --jinja --no-webui -a "$ID" ${EXTRA[@]+"${EXTRA[@]}"} "$@"
