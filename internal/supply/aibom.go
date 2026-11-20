@@ -93,6 +93,19 @@ func AIBOM(l *modelpin.Lock) *BOM {
 			}
 			served.Components = append(served.Components, fc)
 		}
+		// The llama.cpp chat template replaces the GGUF's own and drives tool
+		// calling, so it is part of what is served.
+		if t := m.Serve.LlamaCppChatTemplate; t != nil {
+			tc := Component{Type: "file", Name: t.Path, Properties: []Property{
+				{"size", fmt.Sprint(t.Size)},
+				{"govcode:role", "llama.cpp chat template"},
+				{"govcode:source", t.Source},
+			}}
+			if t.SHA256 != "" && t.SHA256 != modelpin.Unfilled {
+				tc.Hashes = []Hash{{"SHA-256", t.SHA256}}
+			}
+			served.Components = append(served.Components, tc)
+		}
 		b.Components = append(b.Components, served)
 		b.Dependencies = append(b.Dependencies, Dependency{Ref: served.BOMRef, DependsOn: []string{up.BOMRef}})
 	}
