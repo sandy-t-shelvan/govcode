@@ -80,6 +80,29 @@ func (e *Env) rules() *permissions.Rules {
 	return e.Perms
 }
 
+// authorizePath applies tool's rules to the path the caller named and, when
+// that path is a symlink, to the file that will actually be opened. Checking
+// only the link name would let an allowed path such as src/alias.h read a
+// file the policy denies, because the open follows the link. Checking only
+// the target would let a denied path through when the link's target is
+// allowed. Both must pass. opened is the absolute path Resolve returned.
+func (e *Env) authorizePath(tool, requested, opened string) error {
+	lexAbs, err := e.Jail.cleanAbs(requested)
+	if err != nil {
+		return err
+	}
+	lex := e.Jail.Rel(lexAbs)
+	if err := e.authorize(tool, lex); err != nil {
+		return err
+	}
+	if real := e.Jail.Rel(opened); real != lex {
+		if err := e.authorize(tool, real); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // authorize applies the permission rules to one action. It is called by
 // every tool that acts on a path or runs a command, so no caller can skip it.
 func (e *Env) authorize(tool, subject string) error {
