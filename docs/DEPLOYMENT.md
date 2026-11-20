@@ -118,6 +118,9 @@ The digest that Ollama reports must equal `serve.ollama_manifest_digest` in the 
 
 For vLLM or llama.cpp instead, use `deploy/vllm/serve.sh` or `deploy/llamacpp/serve.sh`. Both verify the weights first and bind to 127.0.0.1. Set `model.backend` to `openai` and `model.endpoint` to `http://127.0.0.1:8000/v1` (vLLM) or `http://127.0.0.1:8080/v1` (llama.cpp).
 
+- **vLLM** serves the first-party safetensors, not the GGUF. Stage with `GOVCODE_STAGE_UPSTREAM=1` so they land in `weights/<model-id>/`. `govcode model verify` then checks every file there against the lock and refuses any file the lock does not list, because vLLM loads weight files from that directory by pattern. `deploy/vllm/serve.sh` runs it with `-upstream`, so a staging without those files fails instead of passing. The serving host also needs a C compiler and the Python headers (`gcc` and `python3-devel` on RHEL). Triton compiles a small CUDA driver shim at startup and fails with `Python.h: No such file or directory` without them.
+- **llama.cpp** uses the chat template pinned in the lock (`serve.llamacpp_chat_template`) instead of the one embedded in the GGUF. Devstral-Small-2507's first-party GGUF embeds a template with no tool support, so the model never calls a tool. `serve.sh` also sets `-np 1`, so the single session gets the whole `num_ctx`.
+
 Hardware for a 32k context at Q4_K_M:
 
 | Model | Weights | KV cache (32k, fp16) | Fits |

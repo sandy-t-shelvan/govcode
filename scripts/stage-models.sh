@@ -20,6 +20,16 @@
 #   GOVCODE_SCAN_SIGS="daily.cvd 27471, 2026-11-16"
 # It must exit 0 for clean files. The scanner, its version, the signature
 # version and the result are written into the signed lock and the AI-BOM.
+# Note that ClamAV skips files above its size limits (at most 4 GB per file,
+# 100 MB by default) and still exits 0, so for multi-GB weights "clean" means
+# "not scanned". The control that covers weights is the content check
+# (govcode model sniff): only GGUF and safetensors are accepted.
+#
+# Every model's first-party upstream files are downloaded and verified, which
+# fills their FILL_AT_STAGING hashes. They stay in the build directory unless
+# GOVCODE_STAGE_UPSTREAM=1, which moves them to weights/<model-id>/ for
+# deploy/vllm/serve.sh (adds ~47 GB for Devstral, ~61 GB for Qwen to the
+# transfer). govcode model verify checks them whenever that directory exists.
 #
 # Only GGUF and safetensors weights are staged. Any lock entry naming a
 # pickle-based format (.bin .pt .pth .ckpt .pkl ...) is refused before
@@ -58,7 +68,10 @@ build_llama_cpp() {
   fi
   git -C "$d" checkout -q "$LLAMA_CPP_COMMIT"
   [ "$(git -C "$d" rev-parse HEAD)" = "$(git -C "$d" rev-parse "$LLAMA_CPP_COMMIT^{commit}")" ]
-  cmake -S "$d" -B "$d/build" -DGGML_NATIVE=OFF -DLLAMA_CURL=OFF >/dev/null
+  # The server's embedded web UI is not used (--no-webui) and its prebuilt
+  # assets are fetched from a moving "latest" that the pinned commit rejects.
+  cmake -S "$d" -B "$d/build" -DGGML_NATIVE=OFF -DLLAMA_CURL=OFF \
+    -DLLAMA_USE_PREBUILT_UI=OFF -DLLAMA_BUILD_UI=OFF >/dev/null
   cmake --build "$d/build" -j --target llama-quantize llama-server >/dev/null
   python3 -m venv "$OUT/build/venv"
   "$OUT/build/venv/bin/pip" install -q -r "$d/requirements/requirements-convert_hf_to_gguf.txt"
@@ -69,27 +82,42 @@ for id in "${IDS[@]}"; do
   m=$(jq -c --arg id "$id" '.models[] | select(.id==$id)' "$LOCK")
   [ -n "$m" ] || { echo "unknown model $id" >&2; exit 1; }
   repo=$(jq -r .upstream.repo <<<"$m"); rev=$(jq -r .upstream.revision <<<"$m")
-  src=$OUT/build/$id-src; mkdir -p "$src"
+  src=$OUT/build/$id-src
+  # A previous GOVCODE_STAGE_UPSTREAM=1 run moved the upstream files to
+  # weights/<id>/. Reuse them (they are re-verified below) instead of
+  # downloading every shard again.
+  # Remember that, so a rerun without GOVCODE_STAGE_UPSTREAM=1 puts them back
+  # instead of dropping the vLLM weights from the transfer.
+  had_upstream=0
+  if [ -d "$OUT/weights/$id" ] && [ -z "$(ls -A "$src" 2>/dev/null)" ]; then
+    rm -rf "$src"; mv "$OUT/weights/$id" "$src"; had_upstream=1
+  fi
+  mkdir -p "$src"
 
+  # 1. first-party upstream files at the pinned revision, verified
+  jq -c '.upstream.files[]' <<<"$m" | while read -r f; do
+    p=$(jq -r .path <<<"$f"); want=$(jq -r .sha256 <<<"$f")
+    size=$(jq -r '.size // 0' <<<"$f")
+    # Missing or cut short by an interrupted download: fetch, resuming (-C -).
+    if [ ! -f "$src/$p" ] || [ "$(stat -c %s "$src/$p")" -lt "$size" ]; then
+      hf_get "$repo" "$rev" "$p" "$src/$p"
+    fi
+    if [ "$want" = FILL_AT_STAGING ]; then
+      # small file pinned by git blob id: verify that, then record sha256
+      blob=$(jq -r .git_blob_sha1 <<<"$f")
+      [ "$(git hash-object "$src/$p")" = "$blob" ] || { echo "git blob mismatch $p" >&2; exit 1; }
+      sha=$(sha256sum "$src/$p" | cut -d' ' -f1)
+      setlock "(.models[]|select(.id==\"$id\")|.upstream.files[]|select(.path==\"$p\")|.sha256) = \"$sha\""
+    else
+      verify "$src/$p" "$want"
+    fi
+    case "$p" in *.safetensors|*.gguf) govcode model sniff "$src/$p" ;; esac
+  done
+
+  build_llama_cpp
+  L=$OUT/build/llama.cpp
   if [ "$id" = qwen3-coder-30b-a3b ]; then
-    # 1. first-party weights at pinned revision, verified
-    jq -c '.upstream.files[]' <<<"$m" | while read -r f; do
-      p=$(jq -r .path <<<"$f"); want=$(jq -r .sha256 <<<"$f")
-      [ -f "$src/$p" ] || hf_get "$repo" "$rev" "$p" "$src/$p"
-      if [ "$want" = FILL_AT_STAGING ]; then
-        # small file pinned by git blob id: verify that, then record sha256
-        blob=$(jq -r .git_blob_sha1 <<<"$f")
-        [ "$(git hash-object "$src/$p")" = "$blob" ] || { echo "git blob mismatch $p" >&2; exit 1; }
-        sha=$(sha256sum "$src/$p" | cut -d' ' -f1)
-        setlock "(.models[]|select(.id==\"$id\")|.upstream.files[]|select(.path==\"$p\")|.sha256) = \"$sha\""
-      else
-        verify "$src/$p" "$want"
-      fi
-      case "$p" in *.safetensors|*.gguf) govcode model sniff "$src/$p" ;; esac
-    done
     # 2. quantize with pinned llama.cpp
-    build_llama_cpp
-    L=$OUT/build/llama.cpp
     f16=$OUT/build/$id-F16.gguf
     gguf=$(jq -r '.artifact.files[0].path' <<<"$m")
     "$OUT/build/venv/bin/python" "$L/convert_hf_to_gguf.py" "$src" --outtype f16 --outfile "$f16"
@@ -105,9 +133,27 @@ for id in "${IDS[@]}"; do
 
   govcode model sniff "$OUT/weights/$gguf"
 
-  # Malware scan with the site's offline scanner; any finding stops staging.
-  if ! scan_out=$($GOVCODE_SCAN_CMD "$OUT/weights/$gguf" 2>&1); then
-    echo "MALWARE SCAN FAILED for $gguf:" >&2; echo "$scan_out" >&2; exit 1
+  # Chat template for llama-server, if the lock pins one, from the pinned
+  # llama.cpp checkout (source is "<repo>@<commit>:<path>").
+  tsrc=$(jq -r '.serve.llamacpp_chat_template.source // empty' <<<"$m")
+  if [ -n "$tsrc" ]; then
+    [ "${tsrc%%:*}" = "ggml-org/llama.cpp@$LLAMA_CPP_COMMIT" ] || { echo "template source $tsrc is not the pinned llama.cpp" >&2; exit 1; }
+    tdst=$(jq -r .serve.llamacpp_chat_template.path <<<"$m")
+    cp "$L/${tsrc#*:}" "$OUT/weights/$tdst"
+    verify "$OUT/weights/$tdst" "$(jq -r .serve.llamacpp_chat_template.sha256 <<<"$m")"
+  fi
+
+  if [ "${GOVCODE_STAGE_UPSTREAM:-0}" = 1 ] || [ "$had_upstream" = 1 ]; then
+    rm -rf "$OUT/weights/$id"; mv "$src" "$OUT/weights/$id"
+  fi
+
+  # Malware scan with the site's offline scanner over everything staged for
+  # this model (GGUF, chat template, upstream files); any finding stops staging.
+  scan=("$OUT/weights/$gguf")
+  [ -n "$tsrc" ] && scan+=("$OUT/weights/$tdst")
+  [ -d "$OUT/weights/$id" ] && mapfile -t -O ${#scan[@]} scan < <(find "$OUT/weights/$id" -type f | sort)
+  if ! scan_out=$($GOVCODE_SCAN_CMD "${scan[@]}" 2>&1); then
+    echo "MALWARE SCAN FAILED for $id:" >&2; echo "$scan_out" >&2; exit 1
   fi
   setlock "(.models[]|select(.id==\"$id\")|.staging_scan) = {scanner: \"$SCAN_BIN\", version: $(jq -Rn --arg v "$SCAN_VERSION" '$v'), signatures: $(jq -Rn --arg v "${GOVCODE_SCAN_SIGS:-unrecorded}" '$v'), result: \"clean\", scanned_at: \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
 
@@ -131,5 +177,7 @@ fi
 
 govcode aibom --lock "$LOCK" --out "$OUT/aibom.cdx.json"
 govcode sign --key "$KEY" "$LOCK" "$OUT/aibom.cdx.json"
-( cd "$OUT" && find weights -type f -name '*.gguf' -exec sha256sum {} + > SHA256SUMS && govcode sign --key "$KEY" SHA256SUMS )
+# Every staged file (GGUF, chat template, upstream files for vLLM), so the
+# transfer itself can be checked before anything is loaded.
+( cd "$OUT" && find weights -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS && govcode sign --key "$KEY" SHA256SUMS )
 echo "Staged to $OUT. Transfer the whole directory; verify on the high side with: govcode model verify --dir $OUT"

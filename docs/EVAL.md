@@ -214,9 +214,49 @@ What it shows:
   - **Not tested:** the samplers. Ollama sends top_p 0.9 and min_p 0; llama.cpp defaults to top_p 0.95 and min_p 0.05 (`common/common.h`). The next step is an Ollama scratch model with `PARAMETER top_p 0.95` and `PARAMETER min_p 0.05` on tasks 04 and 09. Any Modelfile change replaces the pinned digest, so a fix means re-staging and re-running the full Ollama eval.
 - **Recommendation:** serve Devstral with llama.cpp or vLLM until the Ollama gap is understood. Ollama works, but it has the least margin.
 
+## Devstral-Small-2507 BF16 on GPU, vLLM (GOV-9 staging)
+
+This is the same model at full precision, served from the staged first-party safetensors through `deploy/vllm/serve.sh`, unmodified. It is a different model artifact from the Q4_K_M runs above, so compare the two tables side by side; do not average them.
+
+| | |
+|---|---|
+| Model | Devstral-Small-2507, first-party safetensors in BF16: `mistralai/Devstral-Small-2507` revision `bd165ab26cebbcc2eea2c4ecbfc07f3ac42b3c39`, 10 shards plus 6 small files, every one verified against the lock by `govcode model verify` before serving |
+| Staging | `scripts/stage-models.sh` with `GOVCODE_STAGE_UPSTREAM=1`. This was a dry run signed with a throwaway key |
+| Server | vLLM v0.34.0 (PyPI wheel, torch 2.14.0+cu130) via `deploy/vllm/serve.sh`: `--tokenizer-mode mistral --tool-call-parser mistral --enable-auto-tool-choice --max-model-len 32768`, offline, 127.0.0.1. Weights 43.9 GiB, KV cache 48.6 GiB |
+| Hardware | as above: 1 × RTX PRO 6000 Blackwell (96 GB) |
+| Throughput | about 30 tokens/s generation, single stream (median of the server's 10 s windows). That is 2.6 × slower than Q4_K_M on llama.cpp, as expected for a 24B model in BF16 on one GPU |
+| govcode | as above, `-endpoint http://127.0.0.1:8000/v1`, `-seed` 42 / 1 / 2 |
+
+Raw reports: [`docs/results/gov-10-devstral-gpu/vllm-bf16/`](results/gov-10-devstral-gpu/vllm-bf16/).
+
+| Task | Lang | Passed (42 / 1 / 2) | Finished | Turns | Exec errors |
+|---|---|---|---|---|---|
+| 01 buffer overflow | C | **yes** / **yes** / **yes** | yes / yes / yes | 20 / 14 / 14 | 2 / 1 / 0 |
+| 02 sign extension | C | **yes** / **yes** / **yes** | yes / yes / yes | 14 / 10 / 16 | 0 / 0 / 0 |
+| 03 implement CRC | C | **yes** / **yes** / **yes** | yes / yes / yes | 11 / 7 / 9 | 1 / 0 / 0 |
+| 04 auto_ptr port | C++ | **yes** / **yes** / **yes** | yes / yes / yes | 8 / 8 / 8 | 0 / 0 / 0 |
+| 05 rule of three | C++ | **yes** / **yes** / **yes** | yes / yes / yes | 11 / 10 / 13 | 0 / 0 / 0 |
+| 06 Constraint_Error | Ada | **yes** / **yes** / **yes** | yes / no / no | 17 / 30 / 30 | 3 / 8 / 11 |
+| 07 missing body | Ada | **yes** / **yes** / **yes** | yes / yes / yes | 14 / 12 / 12 | 3 / 2 / 2 |
+| 08 PIC truncation | COBOL | **yes** / **yes** / **yes** | yes / yes / yes | 15 / 14 / 13 | 5 / 6 / 5 |
+| 09 PERFORM VARYING | COBOL | **yes** / no / **yes** | yes / no / yes | 9 / 30 / 12 | 2 / 23 / 4 |
+| 10 rename across files | C | **yes** / **yes** / **yes** | yes / yes / yes | 19 / 14 / 16 | 0 / 0 / 1 |
+
+| Seed | Passed | Valid calls | Executed OK | Finished | Turns | Wall time | Tokens (prompt / output) |
+|---|---|---|---|---|---|---|---|
+| 42 | 10/10 | 138/138 (100%) | 122/138 (88%) | 10/10 | 138 | 8.3 min | 392,467 / 14,837 |
+| 1 | 9/10 | 149/149 (100%) | 109/149 (73%) | 8/10 | 149 | 8.7 min | 478,098 / 15,448 |
+| 2 | 10/10 | 143/143 (100%) | 120/143 (84%) | 9/10 | 143 | 9.0 min | 429,922 / 15,927 |
+
+**Totals: 29/30 passed (10, 9 and 10 of 10). 100% valid tool calls (430 of 430), all parsed natively. 82% executed without error (351 of 430).** Every seed clears the go/no-go. The only failure was 09 on seed 1, which used all 30 turns with 23 failed executions. 06 passed twice at the turn limit without calling `finish`.
+
+Getting it to run found two problems, both fixed in GOV-9:
+
+- **The launcher could not load the pinned weights.** `serve.sh` forced `--config-format mistral --load-format mistral`. That format reads `consolidated*.safetensors`, but the lock pins the Hugging Face-format shards, so vLLM reported "Cannot find any model weights". The launcher now keeps only `--tokenizer-mode mistral`.
+- **The serving host needs `gcc` and the Python headers.** Triton compiles a small CUDA shim at startup and fails with `Python.h: No such file or directory` without them. See [DEPLOYMENT.md](DEPLOYMENT.md).
+
 ## Still to measure
 
 - Qwen3-Coder-30B-A3B. It is CN-origin and runs only where the AO has granted an exception, so it was not run.
-- The vLLM backend for Devstral, which comes with the GOV-9 staging work.
 - Why Ollama scores below llama.cpp on the same GGUF. Prompt rendering is measured and is at most a small effect; the sampler settings (top_p, min_p) are next.
 - An air-gapped GPU run on the RHEL target host (GOV-39).

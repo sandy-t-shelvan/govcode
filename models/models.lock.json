@@ -24,19 +24,19 @@
             "path": "SYSTEM_PROMPT.txt",
             "size": 5651,
             "git_blob_sha1": "6a143344264d75407ea30b87444d85923e2602a0",
-            "sha256": "FILL_AT_STAGING"
+            "sha256": "5725afc40acd80cbeefba61e41cf50eb7924f6ed2fe6aec2dc6fa0e9f2c396d1"
           },
           {
             "path": "config.json",
             "size": 641,
             "git_blob_sha1": "a7119b3a29f1a7cb9664b4b7ac3d4ce6223223d6",
-            "sha256": "FILL_AT_STAGING"
+            "sha256": "868bdb4e07afca5d86dc0a874f11ede7ff586b1aaa6e3edfc2e82ec3ad771a1b"
           },
           {
             "path": "generation_config.json",
             "size": 132,
             "git_blob_sha1": "137e46fe67f113545d5cb42ee32539827cfbbe77",
-            "sha256": "FILL_AT_STAGING"
+            "sha256": "86acf1e8f5d32e7c25ce501b6d9b6152f4eaf8659e5cea9907ad58d50ba4cc47"
           },
           {
             "path": "model-00001-of-00010.safetensors",
@@ -92,13 +92,13 @@
             "path": "model.safetensors.index.json",
             "size": 29931,
             "git_blob_sha1": "84aee86aea019b2432687f08586a966d4d39aa24",
-            "sha256": "FILL_AT_STAGING"
+            "sha256": "2d570fc53098c04ddc802460b783fbecf0a5b0cf4c4d36e0491a870ad81779fd"
           },
           {
             "path": "params.json",
             "size": 225,
             "git_blob_sha1": "29fe2a5b08abd263a55d382c6f7d231e9926b1c9",
-            "sha256": "FILL_AT_STAGING"
+            "sha256": "52abcf3369f5acc22cdd1ab8a6fcb696122e9e906d9a701fd45296a9fd28e8e8"
           },
           {
             "path": "tekken.json",
@@ -127,7 +127,7 @@
         "max_tokens": 4096,
         "temperature": 0.15,
         "vllm_tool_call_parser": "mistral",
-        "ollama_manifest_digest": "FILL_AT_STAGING",
+        "ollama_manifest_digest": "72998df848f8f75a0925b86a45368bb72a19d96411589645b2ea9764aa9a2e1e",
         "llamacpp_chat_template": {
           "path": "devstral-small-24b.chat_template.jinja",
           "size": 9838,
