@@ -17,10 +17,10 @@
 - `deploy/llamacpp/serve.sh` runs with `-np 1`, so the single session gets the whole `num_ctx` instead of a slot's share.
 - Ollama now gets tool calls from Devstral. `deploy/ollama/Modelfile.devstral-small-24b` rendered calls in the old `[TOOL_CALLS][{"name":…}]` form, and Ollama builds its tool parser from that rendering. Devstral-Small-2507 writes `[TOOL_CALLS]name[ARGS]{…}`, so Ollama parsed none of its calls. The tool list also dropped out of the prompt after the first tool result. The Modelfile now uses the v11 format and lists the tools before the last user message. This changes the model's Ollama digest, so re-stage before deploying (GOV-10).
 - The Mistral text fallback accepts `[TOOL_CALLS]name{…}` without `[ARGS]` when `name` is a known tool.
-
 - `deploy/vllm/serve.sh` can load the pinned Devstral weights. It forced `--load-format mistral`, which reads `consolidated*.safetensors`, but the lock pins the Hugging Face-format shards (GOV-9).
 - `scripts/stage-models.sh` verifies first-party upstream files for every model. For Devstral it used to fetch only the GGUF, so the shards were never checked against the lock. It also malware-scans everything it stages, and a rerun reuses files already staged instead of downloading them again.
-- `govcode model verify` checks the upstream files staged for vLLM in `weights/<model-id>/`, and refuses any file there the lock does not list.
+- `govcode model verify` checks the upstream files staged for vLLM in `weights/<model-id>/`, and refuses any file there the lock does not list. With `-upstream`, which `deploy/vllm/serve.sh` passes, a staging with no upstream files fails verification instead of passing.
+- `scripts/stage-models.sh`: a rerun without `GOVCODE_STAGE_UPSTREAM=1` keeps the vLLM files a previous run staged, an interrupted download resumes, and `SHA256SUMS` lists every staged file rather than only the GGUF.
 
 ### Additions
 - `GOVCODE_STAGE_UPSTREAM=1` stages the verified safetensors for vLLM.

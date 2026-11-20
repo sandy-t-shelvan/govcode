@@ -20,6 +20,10 @@
 #   GOVCODE_SCAN_SIGS="daily.cvd 27471, 2026-11-16"
 # It must exit 0 for clean files. The scanner, its version, the signature
 # version and the result are written into the signed lock and the AI-BOM.
+# Note that ClamAV skips files above its size limits (at most 4 GB per file,
+# 100 MB by default) and still exits 0, so for multi-GB weights "clean" means
+# "not scanned". The control that covers weights is the content check
+# (govcode model sniff): only GGUF and safetensors are accepted.
 #
 # Every model's first-party upstream files are downloaded and verified, which
 # fills their FILL_AT_STAGING hashes. They stay in the build directory unless
@@ -82,15 +86,22 @@ for id in "${IDS[@]}"; do
   # A previous GOVCODE_STAGE_UPSTREAM=1 run moved the upstream files to
   # weights/<id>/. Reuse them (they are re-verified below) instead of
   # downloading every shard again.
+  # Remember that, so a rerun without GOVCODE_STAGE_UPSTREAM=1 puts them back
+  # instead of dropping the vLLM weights from the transfer.
+  had_upstream=0
   if [ -d "$OUT/weights/$id" ] && [ -z "$(ls -A "$src" 2>/dev/null)" ]; then
-    rm -rf "$src"; mv "$OUT/weights/$id" "$src"
+    rm -rf "$src"; mv "$OUT/weights/$id" "$src"; had_upstream=1
   fi
   mkdir -p "$src"
 
   # 1. first-party upstream files at the pinned revision, verified
   jq -c '.upstream.files[]' <<<"$m" | while read -r f; do
     p=$(jq -r .path <<<"$f"); want=$(jq -r .sha256 <<<"$f")
-    [ -f "$src/$p" ] || hf_get "$repo" "$rev" "$p" "$src/$p"
+    size=$(jq -r '.size // 0' <<<"$f")
+    # Missing or cut short by an interrupted download: fetch, resuming (-C -).
+    if [ ! -f "$src/$p" ] || [ "$(stat -c %s "$src/$p")" -lt "$size" ]; then
+      hf_get "$repo" "$rev" "$p" "$src/$p"
+    fi
     if [ "$want" = FILL_AT_STAGING ]; then
       # small file pinned by git blob id: verify that, then record sha256
       blob=$(jq -r .git_blob_sha1 <<<"$f")
@@ -132,7 +143,7 @@ for id in "${IDS[@]}"; do
     verify "$OUT/weights/$tdst" "$(jq -r .serve.llamacpp_chat_template.sha256 <<<"$m")"
   fi
 
-  if [ "${GOVCODE_STAGE_UPSTREAM:-0}" = 1 ]; then
+  if [ "${GOVCODE_STAGE_UPSTREAM:-0}" = 1 ] || [ "$had_upstream" = 1 ]; then
     rm -rf "$OUT/weights/$id"; mv "$src" "$OUT/weights/$id"
   fi
 
@@ -166,5 +177,7 @@ fi
 
 govcode aibom --lock "$LOCK" --out "$OUT/aibom.cdx.json"
 govcode sign --key "$KEY" "$LOCK" "$OUT/aibom.cdx.json"
-( cd "$OUT" && find weights -type f -name '*.gguf' -exec sha256sum {} + > SHA256SUMS && govcode sign --key "$KEY" SHA256SUMS )
+# Every staged file (GGUF, chat template, upstream files for vLLM), so the
+# transfer itself can be checked before anything is loaded.
+( cd "$OUT" && find weights -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS && govcode sign --key "$KEY" SHA256SUMS )
 echo "Staged to $OUT. Transfer the whole directory; verify on the high side with: govcode model verify --dir $OUT"

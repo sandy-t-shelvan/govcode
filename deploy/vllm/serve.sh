@@ -5,7 +5,7 @@
 # For vLLM, stage the upstream safetensors (or an AWQ/FP8 quant) rather than GGUF.
 set -euo pipefail
 DIR=${1:?staged dir}; ID=${2:?model id}; shift 2
-govcode model verify --dir "$DIR" --model "$ID" || { echo "model verification failed; refusing to serve" >&2; exit 1; }
+govcode model verify --dir "$DIR" --model "$ID" -upstream || { echo "model verification failed; refusing to serve" >&2; exit 1; }
 LOCK=$DIR/models.lock.json
 CTX=$(jq -r --arg id "$ID" '.models[]|select(.id==$id)|.serve.num_ctx' "$LOCK")
 PARSER=$(jq -r --arg id "$ID" '.models[]|select(.id==$id)|.serve.vllm_tool_call_parser' "$LOCK")
@@ -24,4 +24,4 @@ exec vllm serve "$DIR/weights/$ID" \
   --max-model-len "$CTX" \
   --enable-auto-tool-choice --tool-call-parser "$PARSER" \
   --disable-log-requests \
-  "${EXTRA[@]}" "$@"
+  ${EXTRA[@]+"${EXTRA[@]}"} "$@"

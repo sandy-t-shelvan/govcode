@@ -56,8 +56,12 @@ func TestVerifyUpstream(t *testing.T) {
 		{Path: "config.json"}, {Path: "model-00001.safetensors"},
 	}}}
 	// No weights/<id>/ directory: a GGUF-only staging, nothing to check.
-	if p := VerifyUpstream(m, dir, nil); len(p) != 0 {
+	if p := VerifyUpstream(m, dir, false, nil); len(p) != 0 {
 		t.Fatalf("absent upstream dir reported: %v", p)
+	}
+	// ...unless the caller serves those files (vLLM): then it is a failure.
+	if p := VerifyUpstream(m, dir, true, nil); len(p) != 1 {
+		t.Fatalf("required but absent upstream dir passed: %v", p)
 	}
 	sub := filepath.Join(dir, "weights", "dev")
 	os.MkdirAll(sub, 0o755)
@@ -68,34 +72,34 @@ func TestVerifyUpstream(t *testing.T) {
 	for i := range m.Upstream.Files {
 		m.Upstream.Files[i].SHA256, _, _ = HashFile(filepath.Join(sub, m.Upstream.Files[i].Path))
 	}
-	if p := VerifyUpstream(m, dir, nil); len(p) != 0 {
+	if p := VerifyUpstream(m, dir, false, nil); len(p) != 0 {
 		t.Fatalf("good upstream failed: %v", p)
 	}
 	os.WriteFile(filepath.Join(sub, "config.json"), []byte(`{"a":2}`), 0o644)
-	if p := VerifyUpstream(m, dir, nil); len(p) != 1 {
+	if p := VerifyUpstream(m, dir, false, nil); len(p) != 1 {
 		t.Fatalf("tampered config: %v", p)
 	}
 	os.WriteFile(filepath.Join(sub, "config.json"), []byte(`{"a":1}`), 0o644)
 	// An unpinned shard next to the pinned ones (vLLM would load it).
 	os.WriteFile(filepath.Join(sub, "consolidated.safetensors"), st, 0o644)
-	if p := VerifyUpstream(m, dir, nil); len(p) != 1 {
+	if p := VerifyUpstream(m, dir, false, nil); len(p) != 1 {
 		t.Fatalf("unpinned extra file: %v", p)
 	}
 	os.Remove(filepath.Join(sub, "consolidated.safetensors"))
 	os.MkdirAll(filepath.Join(sub, "nested"), 0o755)
 	os.WriteFile(filepath.Join(sub, "nested", "x.safetensors"), st, 0o644)
-	if p := VerifyUpstream(m, dir, nil); len(p) != 1 {
+	if p := VerifyUpstream(m, dir, false, nil); len(p) != 1 {
 		t.Fatalf("unpinned nested file: %v", p)
 	}
 	os.RemoveAll(filepath.Join(sub, "nested"))
 	os.Remove(filepath.Join(sub, "config.json"))
-	if p := VerifyUpstream(m, dir, nil); len(p) != 1 {
+	if p := VerifyUpstream(m, dir, false, nil); len(p) != 1 {
 		t.Fatal("missing upstream file passed")
 	}
 	os.WriteFile(filepath.Join(sub, "model-00001.safetensors"), []byte("\x80\x04pickle"), 0o644)
 	m.Upstream.Files = m.Upstream.Files[1:]
 	m.Upstream.Files[0].SHA256, _, _ = HashFile(filepath.Join(sub, "model-00001.safetensors"))
-	if p := VerifyUpstream(m, dir, nil); len(p) != 1 {
+	if p := VerifyUpstream(m, dir, false, nil); len(p) != 1 {
 		t.Fatal("non-safetensors content under a .safetensors name passed")
 	}
 }

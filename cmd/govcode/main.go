@@ -674,6 +674,7 @@ func cmdModel(ctx context.Context, args []string) error {
 		id := fs.String("model", "", "model id (default: lock default)")
 		var keys multi
 		fs.Var(&keys, "key", "trusted model-signing public key (repeatable)")
+		upstream := fs.Bool("upstream", false, "also require the first-party upstream files in weights/<model-id>/ (vLLM serves them)")
 		fs.Parse(args[1:])
 		lockPath := filepath.Join(*dir, "models.lock.json")
 		var l *modelpin.Lock
@@ -702,7 +703,7 @@ func cmdModel(ctx context.Context, args []string) error {
 		probs := m.CheckFormats()
 		hashing := func(p string) { fmt.Println("hashing", p) }
 		probs = append(probs, modelpin.VerifyArtifacts(m, *dir, hashing)...)
-		probs = append(probs, modelpin.VerifyUpstream(m, *dir, hashing)...)
+		probs = append(probs, modelpin.VerifyUpstream(m, *dir, *upstream, hashing)...)
 		if s := m.StagingScan; s == nil {
 			fmt.Println("  WARN no staging malware scan recorded in the lock")
 		} else if s.Result != "clean" {

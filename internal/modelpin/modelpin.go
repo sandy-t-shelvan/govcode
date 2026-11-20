@@ -168,9 +168,14 @@ func VerifyArtifacts(m *Model, dir string, progress func(string)) []Problem {
 // upstream weights. If it is present, every upstream file in the lock must be
 // there and match, and nothing else may be: vLLM picks up weight files in
 // that directory by pattern, so an extra shard would be loaded unpinned.
-func VerifyUpstream(m *Model, dir string, progress func(string)) []Problem {
+// With require set (the vLLM launcher sets it), a missing directory is a
+// failure too, so verify cannot pass for a staging that has nothing to serve.
+func VerifyUpstream(m *Model, dir string, require bool, progress func(string)) []Problem {
 	sub := filepath.Join(dir, "weights", m.ID)
 	if fi, err := os.Stat(sub); err != nil || !fi.IsDir() {
+		if require {
+			return []Problem{{sub, "no upstream files staged here (stage with GOVCODE_STAGE_UPSTREAM=1)"}}
+		}
 		return nil
 	}
 	var probs []Problem
