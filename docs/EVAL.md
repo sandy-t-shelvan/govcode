@@ -164,7 +164,7 @@ This is the same GGUF as the llama.cpp runs above, served by Ollama, which is th
 | | |
 |---|---|
 | Model | as above: `Devstral-Small-2507-Q4_K_M.gguf`, sha256 `1bcc2b1b…1796` |
-| Server | Ollama v0.40.16 (`d63b7026`, release tarball checked against its `sha256sum.txt`), 127.0.0.1:11434, `OLLAMA_CONTEXT_LENGTH=32768`. All 41/41 layers on the GPU, f16 KV cache. Manifest digest `72998df8…a2e1e` |
+| Server | Ollama v0.40.16 (`d63b7026`, release tarball checked against its `sha256sum.txt`), 127.0.0.1:11434, otherwise default server settings. The context was 32768 (`n_ctx` in the server log), set by the Modelfile's `num_ctx` and by govcode on every request. All 41/41 layers on the GPU, f16 KV cache. Manifest digest `72998df8…a2e1e` |
 | Sampler | the Modelfile's `temperature 0.15`, `num_ctx 32768`, `num_predict 4096`. Ollama defaults otherwise (top_k 40, top_p 0.9, repeat_penalty 1.0) |
 | Throughput | about 84 tokens/s generation |
 | govcode | as above, `-backend ollama -model govcode-devstral:24b-q4km`, `-seed` 42 / 1 / 2 |
