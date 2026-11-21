@@ -417,6 +417,76 @@ func TestReadRulesCoverEveryContentTool(t *testing.T) {
 	}
 }
 
+// A symlink is checked out like any other file. Its path can be one the
+// policy allows while its target is a file the policy denies. Tools must
+// apply read rules to the file that will actually be opened.
+func TestSymlinkCannotBypassReadRules(t *testing.T) {
+	const secret = "int secret_fn(void)\n{\n    return 4242;\n}\n"
+	const okSrc = "int ok_fn(void) { return 1; }\n"
+	e := repo(t, map[string]string{"keys/creds.h": secret, "src/ok.c": okSrc})
+	if err := os.Symlink("../keys/creds.h", filepath.Join(e.Jail.Root, "src", "alias.h")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("ok.c", filepath.Join(e.Jail.Root, "src", "ok-link.c")); err != nil {
+		t.Fatal(err)
+	}
+	e.Perms, _ = permissions.Parse(nil, nil, []string{"read_file(keys/**)"})
+	s := NewSet(e)
+
+	for _, c := range []struct {
+		tool string
+		args map[string]any
+	}{
+		{"read_file", map[string]any{"path": "src/alias.h"}},
+		{"outline", map[string]any{"path": "src/alias.h"}},
+		{"edit_file", map[string]any{"path": "src/alias.h", "old_text": "return 4242;", "new_text": "return 1;"}},
+	} {
+		out, err := call(t, s, c.tool, c.args)
+		seen := out
+		if err != nil {
+			seen += "\n" + err.Error()
+		}
+		if err == nil || !strings.Contains(err.Error(), "denied") || strings.Contains(seen, "secret_fn") || strings.Contains(seen, "4242") {
+			t.Fatalf("%s through a symlink: %v\n%s", c.tool, err, seen)
+		}
+	}
+	got, _ := os.ReadFile(filepath.Join(e.Jail.Root, "keys/creds.h"))
+	if string(got) != secret {
+		t.Fatalf("symlink edit modified the protected file:\n%s", got)
+	}
+	// The link's own path is allowed. An ask on the target must name the
+	// target, so the reviewer approves the file that would be read.
+	ask, _ := permissions.Parse(nil, []string{"read_file(keys/**)"}, nil)
+	e.Perms = ask
+	ap := &denyAll{}
+	e.Approver = ap
+	if _, err := call(t, NewSet(e), "read_file", map[string]any{"path": "src/alias.h"}); err == nil {
+		t.Fatal("ask-protected target was read through a symlink")
+	}
+	if len(ap.asked) != 1 || !strings.Contains(ap.asked[0], "keys/creds.h") {
+		t.Fatalf("approver was not asked about the target: %v", ap.asked)
+	}
+
+	// A link to an unprotected file still reads and edits that file.
+	e.Perms, _ = permissions.Parse(nil, nil, []string{"read_file(keys/**)"})
+	e.Approver = nil
+	s = NewSet(e)
+	out, err := call(t, s, "read_file", map[string]any{"path": "src/ok-link.c"})
+	if err != nil || !strings.Contains(out, "ok_fn") {
+		t.Fatalf("symlink to an allowed file: %v\n%s", err, out)
+	}
+	if _, err := call(t, s, "edit_file", map[string]any{"path": "src/ok-link.c", "old_text": "return 1;", "new_text": "return 2;"}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = os.ReadFile(filepath.Join(e.Jail.Root, "src/ok.c"))
+	if !strings.Contains(string(got), "return 2;") {
+		t.Fatalf("edit through an allowed symlink did not change the target:\n%s", got)
+	}
+	if !e.Changed["src/ok.c"] {
+		t.Fatalf("edit tracked the link, not the file it wrote: %v", e.Changed)
+	}
+}
+
 // Commands must not read what read_file may not (GOV-47): read-protected
 // worktree files are masked inside the sandbox, and git is hidden so history
 // cannot reveal them either. Exposed paths stay visible to commands only.
@@ -448,6 +518,12 @@ func TestSandboxHidesReadProtectedFiles(t *testing.T) {
 		}
 		if r := run(e, "echo x > keys/creds.h"); r.ExitCode == 0 {
 			t.Fatal("a command overwrote a read-denied file")
+		}
+		if err := os.Symlink("../keys/creds.h", filepath.Join(e.Jail.Root, "src", "alias.h")); err != nil {
+			t.Fatal(err)
+		}
+		if r := run(e, "cat src/alias.h"); strings.Contains(r.Output, "4242") {
+			t.Fatalf("symlink in the sandbox revealed a read-denied file:\n%s", r.Output)
 		}
 	})
 

@@ -34,32 +34,22 @@ func NewJail(root string) (*Jail, error) {
 var ErrOutsideRepo = errors.New("path is outside the repository")
 
 // Resolve maps a model-supplied path (relative to the repo root, or absolute
-// inside it) to an absolute path, rejecting escapes via "..", absolute paths
-// elsewhere, symlinks pointing out, and denied components.
+// inside it) to the absolute path that will actually be opened. ".." and
+// absolute paths outside the repo are rejected, and so is a symlink that
+// points out of the repo. Symlinks that stay inside are resolved: the
+// returned path is the target, so a later permission check sees the file
+// that would be read or written, not the link's own name. A path that lands
+// in .git or .govcode, either as requested or after resolution, is rejected.
 func (j *Jail) Resolve(p string) (string, error) {
-	if strings.TrimSpace(p) == "" {
-		return "", errors.New("path is empty")
+	abs, err := j.cleanAbs(p)
+	if err != nil {
+		return "", err
 	}
-	if strings.ContainsRune(p, 0) {
-		return "", errors.New("path contains NUL")
-	}
-	var abs string
-	if filepath.IsAbs(p) {
-		abs = filepath.Clean(p)
-	} else {
-		abs = filepath.Join(j.Root, p)
-	}
-	if !j.within(abs) {
-		return "", fmt.Errorf("%w: %s", ErrOutsideRepo, p)
-	}
-	rel, _ := filepath.Rel(j.Root, abs)
-	for _, c := range strings.Split(rel, string(filepath.Separator)) {
-		if deniedComponents[c] {
-			return "", fmt.Errorf("access to %s is not permitted", c)
-		}
+	if err := j.denyComponents(abs); err != nil {
+		return "", err
 	}
 	// Resolve symlinks on the deepest existing ancestor so a link inside the
-	// repo cannot point outside it.
+	// repo cannot point outside it, including a link to .git or .govcode.
 	probe := abs
 	for {
 		if _, err := os.Lstat(probe); err == nil {
@@ -75,10 +65,54 @@ func (j *Jail) Resolve(p string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if probe != abs {
+		rest, rerr := filepath.Rel(probe, abs)
+		if rerr != nil {
+			return "", rerr
+		}
+		real = filepath.Join(real, rest)
+	}
+	real = filepath.Clean(real)
 	if !j.within(real) {
 		return "", fmt.Errorf("%w: %s (symlink escapes repository)", ErrOutsideRepo, p)
 	}
+	if err := j.denyComponents(real); err != nil {
+		return "", err
+	}
+	return real, nil
+}
+
+// cleanAbs is the cleaned absolute path of p with no symlink resolution.
+func (j *Jail) cleanAbs(p string) (string, error) {
+	if strings.TrimSpace(p) == "" {
+		return "", errors.New("path is empty")
+	}
+	if strings.ContainsRune(p, 0) {
+		return "", errors.New("path contains NUL")
+	}
+	var abs string
+	if filepath.IsAbs(p) {
+		abs = filepath.Clean(p)
+	} else {
+		abs = filepath.Join(j.Root, p)
+	}
+	if !j.within(abs) {
+		return "", fmt.Errorf("%w: %s", ErrOutsideRepo, p)
+	}
 	return abs, nil
+}
+
+func (j *Jail) denyComponents(abs string) error {
+	rel, err := filepath.Rel(j.Root, abs)
+	if err != nil {
+		return err
+	}
+	for _, c := range strings.Split(rel, string(filepath.Separator)) {
+		if deniedComponents[c] {
+			return fmt.Errorf("access to %s is not permitted", c)
+		}
+	}
+	return nil
 }
 
 func (j *Jail) within(p string) bool {

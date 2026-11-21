@@ -38,10 +38,12 @@ func (t *editFile) Run(ctx context.Context, a map[string]any) (string, error) {
 	}
 	// The result (a diff with context lines) and the error hints reveal the
 	// file's content, so read_file rules apply as well as edit_file rules.
-	if err := t.e.authorize("read_file", t.e.Jail.Rel(abs)); err != nil {
+	// Both are checked on the path that will be opened, not only the name
+	// the model passed, so a symlink cannot point them at a protected file.
+	if err := t.e.authorizePath("read_file", rel, abs); err != nil {
 		return "", err
 	}
-	if err := t.e.authorize("edit_file", t.e.Jail.Rel(abs)); err != nil {
+	if err := t.e.authorizePath("edit_file", rel, abs); err != nil {
 		return "", err
 	}
 	data, err := os.ReadFile(abs)
@@ -178,7 +180,7 @@ func (t *createFile) Run(ctx context.Context, a map[string]any) (string, error) 
 	if err != nil {
 		return "", err
 	}
-	if err := t.e.authorize("create_file", t.e.Jail.Rel(abs)); err != nil {
+	if err := t.e.authorizePath("create_file", rel, abs); err != nil {
 		return "", err
 	}
 	if t.e.spill("create_file content for "+t.e.Jail.Rel(abs), str(a, "content")) {

@@ -40,7 +40,10 @@ func TestJail(t *testing.T) {
 	e := repo(t, map[string]string{"a.c": "x"})
 	outside := t.TempDir()
 	os.Symlink(outside, filepath.Join(e.Jail.Root, "escape"))
-	for _, bad := range []string{"../x", "/etc/passwd", ".git/config", "src/../../x", "escape/secret", ".govcode/policy.json", "sub/.git/hooks/pre-commit"} {
+	os.Symlink(".git/config", filepath.Join(e.Jail.Root, "gitlink"))
+	os.Symlink(".git", filepath.Join(e.Jail.Root, "gitdir"))
+	os.Symlink("a.c", filepath.Join(e.Jail.Root, "alias.c"))
+	for _, bad := range []string{"../x", "/etc/passwd", ".git/config", "src/../../x", "escape/secret", ".govcode/policy.json", "sub/.git/hooks/pre-commit", "gitlink", "gitdir", "alias.c/../../.git/HEAD"} {
 		if _, err := e.Jail.Resolve(bad); err == nil {
 			t.Errorf("Resolve(%q) allowed", bad)
 		}
@@ -49,6 +52,13 @@ func TestJail(t *testing.T) {
 		if _, err := e.Jail.Resolve(ok); err != nil {
 			t.Errorf("Resolve(%q): %v", ok, err)
 		}
+	}
+	got, err := e.Jail.Resolve("alias.c")
+	if err != nil {
+		t.Fatalf("Resolve(alias.c): %v", err)
+	}
+	if got != filepath.Join(e.Jail.Root, "a.c") {
+		t.Fatalf("Resolve(alias.c) = %s, want the target a.c", got)
 	}
 }
 

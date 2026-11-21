@@ -254,7 +254,7 @@ func (t *readFile) Run(_ context.Context, a map[string]any) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := t.e.authorize("read_file", t.e.Jail.Rel(abs)); err != nil {
+	if err := t.e.authorizePath("read_file", str(a, "path"), abs); err != nil {
 		return "", err
 	}
 	data, err := os.ReadFile(abs)

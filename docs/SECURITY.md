@@ -20,7 +20,7 @@
 
 ### 2. Agent confined to one repo
 - The policy names exactly one `repo_root`; govcode refuses to run anywhere else.
-- Each run gets its own git worktree. Every file path goes through `tools.Jail`: absolute paths outside the worktree, `..` escapes, symlinks pointing out, `.git` and `.govcode` are all refused.
+- Each run gets its own git worktree. Every file path goes through `tools.Jail`: absolute paths outside the worktree, `..` escapes, symlinks pointing out, `.git` and `.govcode` are all refused. A symlink that stays inside the repository is resolved before the file is opened, and permission rules are applied to the requested path and to the target. A link cannot be used to read or edit a protected file, or to reach `.git` or `.govcode`.
 - Commands see the system directories read-only and the worktree read-write. They do not see `$HOME` (where signing keys live), other repositories, the policy, or the audit log; `state_dir` must be outside `repo_root`. The process group is killed on timeout.
 - A command outside the allowlist needs a typed `y` on `/dev/tty`, so piped input cannot approve it. An allowlisted prefix only auto-approves the simple case: any `;`, `&&`, `|`, `$( )`, backticks or redirection sends the command back to the human.
 - Commits use `core.hooksPath=/dev/null` and `--no-verify`, so hooks the model wrote never run.
