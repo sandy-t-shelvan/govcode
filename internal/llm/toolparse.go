@@ -138,13 +138,13 @@ func parseHermes(s string, known map[string]ToolSpec) ([]ToolCall, string) {
 	return calls, strings.TrimSpace(reToolCall.ReplaceAllString(s, ""))
 }
 
-// One v11 call per [TOOL_CALLS] segment: name, then [ARGS], then a JSON object.
+// v11 call head: name, then optional [ARGS]. The JSON object is not part of
+// this match; it is scanned separately so a "}" or "[TOOL_CALLS]" inside a
+// string does not end the object or start another call.
 // [ARGS] is optional: Ollama strips it as a control token but can leave
 // [TOOL_CALLS] in the text (captured from Devstral-Small-2507 on Ollama
 // v0.40.16, GOV-10). Without [ARGS] the name must be a known tool.
-// Splitting on the marker first keeps one call's match from running into
-// the next, so back-to-back calls are all returned.
-var reMistralV11Seg = regexp.MustCompile(`(?s)^\s*([A-Za-z0-9_\-]+)\s*(\[ARGS\])?\s*(\{.*\})\s*(?:</s>)?\s*$`)
+var reMistralV11Head = regexp.MustCompile(`^\s*([A-Za-z0-9_\-]+)\s*(\[ARGS\])?\s*`)
 
 func parseMistral(s string, known map[string]ToolSpec) ([]ToolCall, string) {
 	idx := strings.Index(s, "[TOOL_CALLS]")
@@ -152,18 +152,7 @@ func parseMistral(s string, known map[string]ToolSpec) ([]ToolCall, string) {
 		return nil, s
 	}
 	// Newer tokenizer format: [TOOL_CALLS]name[ARGS]{...}[TOOL_CALLS]...
-	var v11 []ToolCall
-	for _, seg := range strings.Split(s[idx+len("[TOOL_CALLS]"):], "[TOOL_CALLS]") {
-		m := reMistralV11Seg.FindStringSubmatch(seg)
-		if m == nil {
-			continue
-		}
-		if _, ok := known[m[1]]; m[2] == "" && !ok {
-			continue
-		}
-		v11 = append(v11, ToolCall{Name: m[1], Args: normalizeArgs(json.RawMessage(m[3])), Source: SourceMistral})
-	}
-	if len(v11) > 0 {
+	if v11 := parseMistralV11(s[idx+len("[TOOL_CALLS]"):], known); len(v11) > 0 {
 		return v11, strings.TrimSpace(s[:idx])
 	}
 	payload := RepairJSON(strings.TrimSpace(s[idx+len("[TOOL_CALLS]"):]))
@@ -182,6 +171,112 @@ func parseMistral(s string, known map[string]ToolSpec) ([]ToolCall, string) {
 		}
 	}
 	return calls, strings.TrimSpace(s[:idx])
+}
+
+// parseMistralV11 reads back-to-back [TOOL_CALLS]name[ARGS]{...} calls.
+// The marker is recognized only between calls. A marker or brace inside a
+// JSON string is part of that call's arguments, and a call whose object
+// never closes is not mined for a further call: both used to happen when
+// the text was split on the marker before the JSON was parsed, so an edit
+// of a file that mentions the marker was dropped and a truncated edit could
+// run the command written inside its arguments.
+func parseMistralV11(s string, known map[string]ToolSpec) []ToolCall {
+	const marker = "[TOOL_CALLS]"
+	var calls []ToolCall
+	for i := 0; i < len(s); {
+		m := reMistralV11Head.FindStringSubmatchIndex(s[i:])
+		if m == nil || m[0] != 0 {
+			next := strings.Index(s[i:], marker)
+			if next < 0 {
+				break
+			}
+			i += next + len(marker)
+			continue
+		}
+		name := s[i+m[2] : i+m[3]]
+		hasArgs := m[4] >= 0
+		objStart := i + m[1]
+		if objStart >= len(s) || s[objStart] != '{' {
+			next := strings.Index(s[objStart:], marker)
+			if next < 0 {
+				break
+			}
+			i = objStart + next + len(marker)
+			continue
+		}
+		rel, ok := jsonObjectEnd(s[objStart:])
+		if !ok {
+			break
+		}
+		objEnd := objStart + rel
+		j := skipSpace(s, objEnd)
+		if strings.HasPrefix(s[j:], "</s>") {
+			j = skipSpace(s, j+len("</s>"))
+		}
+		if j >= len(s) || strings.HasPrefix(s[j:], marker) {
+			if _, knownName := known[name]; hasArgs || knownName {
+				calls = append(calls, ToolCall{Name: name, Args: normalizeArgs(json.RawMessage(s[objStart:objEnd])), Source: SourceMistral})
+			}
+			if strings.HasPrefix(s[j:], marker) {
+				i = j + len(marker)
+				continue
+			}
+			break
+		}
+		// Trailing text after the object: this was not a call. The next
+		// marker, if any, is after the object, so one inside it is not reused.
+		next := strings.Index(s[objEnd:], marker)
+		if next < 0 {
+			break
+		}
+		i = objEnd + next + len(marker)
+	}
+	return calls
+}
+
+// jsonObjectEnd returns the length of the object at the start of s.
+// Braces inside strings do not count, and an unclosed object is not an object.
+func jsonObjectEnd(s string) (int, bool) {
+	if s == "" || s[0] != '{' {
+		return 0, false
+	}
+	depth := 0
+	inStr, esc := false, false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if inStr {
+			if esc {
+				esc = false
+				continue
+			}
+			switch c {
+			case '\\':
+				esc = true
+			case '"':
+				inStr = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inStr = true
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return i + 1, true
+			}
+		}
+	}
+	return 0, false
+}
+
+func skipSpace(s string, i int) int {
+	for i < len(s) && (s[i] == ' ' || s[i] == '\n' || s[i] == '\r' || s[i] == '\t') {
+		i++
+	}
+	return i
 }
 
 const graniteMarker = "<|tool_call|>"

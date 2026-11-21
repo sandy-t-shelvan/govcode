@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Security fixes
+- The Mistral tool-call fallback no longer splits a call on `[TOOL_CALLS]` inside its JSON arguments. An edit whose text contained that marker was dropped, and a truncated edit could run the command written inside the argument (`make` and `gcc` are allowlisted).
 - Commands (`run_command`, `run_tests`, site hooks, analyzers) can no longer read files that `read_file` rules deny or ask for: such files are masked inside the sandbox, and git data is hidden while read rules exist, so history cannot reveal them (GOV-47). New policy fields `sandbox.expose` and `sandbox.expose_git` opt specific paths, or git, back in. Policies that use them do not load in v0.3.0.
 
 ### Behaviour changes
