@@ -54,29 +54,69 @@ func number(calls []ToolCall) []ToolCall {
 }
 
 var (
-	reQwenFunc  = regexp.MustCompile(`(?s)<function=([A-Za-z0-9_\-]+)>(.*?)</function>`)
-	reQwenParam = regexp.MustCompile(`(?s)<parameter=([A-Za-z0-9_\-]+)>(.*?)</parameter>`)
-	reToolCall  = regexp.MustCompile(`(?s)<tool_call>(.*?)(?:</tool_call>|$)`)
+	reQwenFunc      = regexp.MustCompile(`(?s)<function=([A-Za-z0-9_\-]+)>(.*?)</function>`)
+	reQwenParam     = regexp.MustCompile(`(?s)<parameter=([A-Za-z0-9_\-]+)>(.*?)</parameter>`)
+	reToolCallBlock = regexp.MustCompile(`(?s)<tool_call>(.*?)</tool_call>`)
 )
 
+// parseQwenXML reads Qwen3-Coder calls. Each call is one <tool_call> block
+// containing one <function>. A block that closes early (because an argument
+// contains </function> or </tool_call>) is not a call: the text that follows
+// would otherwise be executed as a different tool. The whole reply is left
+// unparsed in that case, so nothing inside the argument runs.
 func parseQwenXML(s string, known map[string]ToolSpec) ([]ToolCall, string) {
 	if !strings.Contains(s, "<function=") {
 		return nil, s
 	}
-	var calls []ToolCall
-	for _, m := range reQwenFunc.FindAllStringSubmatch(s, -1) {
-		name := m[1]
-		args := map[string]any{}
-		spec := known[name]
-		for _, p := range reQwenParam.FindAllStringSubmatch(m[2], -1) {
-			args[p[1]] = coerceXMLValue(trimOneNewline(p[2]), spec.Properties[p[1]].Type)
-		}
-		b, _ := json.Marshal(args)
-		calls = append(calls, ToolCall{Name: name, Args: b, Source: SourceQwenXML})
+	locs := reToolCallBlock.FindAllStringSubmatchIndex(s, -1)
+	if len(locs) == 0 {
+		return nil, s
 	}
-	rest := reToolCall.ReplaceAllString(s, "")
-	rest = reQwenFunc.ReplaceAllString(rest, "")
-	return calls, strings.TrimSpace(rest)
+	var calls []ToolCall
+	for _, loc := range locs {
+		body := s[loc[2]:loc[3]]
+		funcs := reQwenFunc.FindAllStringSubmatchIndex(body, -1)
+		if len(funcs) != 1 {
+			return nil, s
+		}
+		f := funcs[0]
+		if xmlMarkup(body[:f[0]] + body[f[1]:]) {
+			return nil, s
+		}
+		m := reQwenFunc.FindStringSubmatch(body)
+		if m == nil {
+			return nil, s
+		}
+		calls = append(calls, qwenCall(m[1], m[2], known))
+	}
+	rest := s
+	for i := len(locs) - 1; i >= 0; i-- {
+		rest = rest[:locs[i][0]] + rest[locs[i][1]:]
+	}
+	rest = strings.TrimSpace(rest)
+	if xmlMarkup(rest) || strings.Contains(rest, "<function=") {
+		return nil, s
+	}
+	return calls, rest
+}
+
+func qwenCall(name, body string, known map[string]ToolSpec) ToolCall {
+	args := map[string]any{}
+	spec := known[name]
+	for _, p := range reQwenParam.FindAllStringSubmatch(body, -1) {
+		args[p[1]] = coerceXMLValue(trimOneNewline(p[2]), spec.Properties[p[1]].Type)
+	}
+	b, _ := json.Marshal(args)
+	return ToolCall{Name: name, Args: b, Source: SourceQwenXML}
+}
+
+func xmlMarkup(s string) bool {
+	for _, t := range []string{"<tool_call>", "</tool_call>", "<function=", "</function>", "<parameter=", "</parameter>"} {
+		if strings.Contains(s, t) {
+			return true
+		}
+	}
+	return false
 }
 
 // Qwen3-Coder emits a newline after <parameter=x> and before </parameter>;
@@ -124,18 +164,90 @@ func (n nameArgs) toCall(src string) ToolCall {
 	return ToolCall{Name: n.Name, Args: normalizeArgs(a), Source: src}
 }
 
-func parseHermes(s string, known map[string]ToolSpec) ([]ToolCall, string) {
-	if !strings.Contains(s, "<tool_call>") {
+// parseHermes reads Hermes/Qwen2.5 calls. The JSON object is scanned with
+// string boundaries, so a </tool_call> inside an argument is not the end of
+// the call and is not the start of another one. A <tool_call> that is not
+// one JSON object followed by </tool_call> contributes no call.
+func parseHermes(s string, _ map[string]ToolSpec) ([]ToolCall, string) {
+	const open, closeTag = "<tool_call>", "</tool_call>"
+	if !strings.Contains(s, open) {
 		return nil, s
 	}
 	var calls []ToolCall
-	for _, m := range reToolCall.FindAllStringSubmatch(s, -1) {
+	var b strings.Builder
+	for i := 0; i < len(s); {
+		rel := strings.Index(s[i:], open)
+		if rel < 0 {
+			b.WriteString(s[i:])
+			break
+		}
+		start := i + rel
+		b.WriteString(s[i:start])
+		raw, n, ok := scanJSONValue(s[start+len(open):])
+		after := start + len(open)
+		var tail string
+		if ok {
+			after += n
+			tail = strings.TrimLeft(s[after:], " \t\r\n")
+		}
 		var na nameArgs
-		if json.Unmarshal([]byte(RepairJSON(m[1])), &na) == nil && na.Name != "" {
-			calls = append(calls, na.toCall(SourceHermes))
+		if !ok || !strings.HasPrefix(tail, closeTag) || json.Unmarshal([]byte(RepairJSON(raw)), &na) != nil || na.Name == "" {
+			// Not one object closed by </tool_call>. Stop. Searching again
+			// would treat a call written inside the argument as a real one.
+			b.WriteString(s[start:])
+			break
+		}
+		calls = append(calls, na.toCall(SourceHermes))
+		i = after + (len(s[after:]) - len(tail)) + len(closeTag)
+	}
+	if len(calls) == 0 {
+		return nil, s
+	}
+	return calls, strings.TrimSpace(b.String())
+}
+
+// scanJSONValue returns the first JSON object or array in s, which may
+// start with whitespace. n is the number of bytes consumed, including that
+// whitespace. Strings are respected, so a brace or bracket inside a string
+// does not change the depth.
+func scanJSONValue(s string) (raw string, n int, ok bool) {
+	i := 0
+	for i < len(s) && (s[i] == ' ' || s[i] == '\t' || s[i] == '\n' || s[i] == '\r') {
+		i++
+	}
+	if i >= len(s) || (s[i] != '{' && s[i] != '[') {
+		return "", 0, false
+	}
+	start := i
+	var stack []byte
+	inStr, esc := false, false
+	for ; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case esc:
+			esc = false
+		case inStr && c == '\\':
+			esc = true
+		case c == '"':
+			inStr = !inStr
+		case inStr:
+		case c == '{' || c == '[':
+			stack = append(stack, c)
+		case c == '}' || c == ']':
+			if len(stack) == 0 {
+				return "", 0, false
+			}
+			open := stack[len(stack)-1]
+			if (c == '}' && open != '{') || (c == ']' && open != '[') {
+				return "", 0, false
+			}
+			stack = stack[:len(stack)-1]
+			if len(stack) == 0 {
+				return s[start : i+1], i + 1, true
+			}
 		}
 	}
-	return calls, strings.TrimSpace(reToolCall.ReplaceAllString(s, ""))
+	return "", 0, false
 }
 
 // One v11 call per [TOOL_CALLS] segment: name, then [ARGS], then a JSON object.
