@@ -210,11 +210,43 @@ func parseGranite(s string, known map[string]ToolSpec) ([]ToolCall, string) {
 	return calls, before
 }
 
-var reFence = regexp.MustCompile("(?s)```(?:json|JSON)?\\s*\n(.*?)```")
+var reFenceOpen = regexp.MustCompile("(?s)```(?:json|JSON)?\\s*\n")
+
+// fenceCloser is the next ``` that is outside a JSON string. A fence inside
+// a string is argument text. The scan is not a full JSON parser: a quote in
+// an unclosed string can make it stop at a later fence, and the caller must
+// not repair a body that still contains ```.
+func fenceCloser(s string) int {
+	inStr, esc := false, false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if inStr {
+			if esc {
+				esc = false
+				continue
+			}
+			if c == '\\' {
+				esc = true
+				continue
+			}
+			if c == '"' {
+				inStr = false
+			}
+			continue
+		}
+		if c == '"' {
+			inStr = true
+			continue
+		}
+		if i+3 <= len(s) && s[i:i+3] == "```" {
+			return i
+		}
+	}
+	return -1
+}
 
 func parseJSONBlocks(s string, known map[string]ToolSpec) ([]ToolCall, string) {
 	var calls []ToolCall
-	rest := s
 	try := func(raw string) bool {
 		fixed := RepairJSON(raw)
 		// A list of calls (Granite and others write one when they fall back
@@ -244,10 +276,60 @@ func parseJSONBlocks(s string, known map[string]ToolSpec) ([]ToolCall, string) {
 		calls = append(calls, na.toCall(SourceJSON))
 		return true
 	}
-	for _, m := range reFence.FindAllStringSubmatch(s, -1) {
-		if try(m[1]) {
-			rest = strings.Replace(rest, m[0], "", 1)
+	// A fence ends a block only after one JSON value. ``` inside a string
+	// stays part of that value. Repairing up to the first fence would turn
+	// an edit of a markdown sample into a write of only the text before the
+	// sample. A body that still contains a fence is not repaired into a call.
+	type span struct{ start, end int }
+	var cut []span
+	for i := 0; i < len(s); {
+		loc := reFenceOpen.FindStringIndex(s[i:])
+		if loc == nil {
+			break
 		}
+		opener := i + loc[0]
+		bodyAt := i + loc[1]
+		dec := json.NewDecoder(strings.NewReader(s[bodyAt:]))
+		var raw json.RawMessage
+		if err := dec.Decode(&raw); err == nil {
+			after := bodyAt + int(dec.InputOffset())
+			tail := s[after:]
+			trimmed := strings.TrimLeft(tail, " \t\r\n")
+			if strings.HasPrefix(trimmed, "```") {
+				end := after + (len(tail) - len(trimmed)) + 3
+				if try(string(raw)) {
+					cut = append(cut, span{opener, end})
+				}
+				i = end
+				continue
+			}
+			if rel := strings.Index(s[after:], "```"); rel >= 0 {
+				i = after + rel + 3
+				continue
+			}
+			break
+		}
+		rel := fenceCloser(s[bodyAt:])
+		if rel < 0 {
+			tail := s[bodyAt:]
+			if !strings.Contains(tail, "```") && try(tail) {
+				cut = append(cut, span{opener, len(s)})
+			}
+			break
+		}
+		body := s[bodyAt : bodyAt+rel]
+		end := bodyAt + rel + 3
+		if !strings.Contains(body, "```") && try(body) {
+			cut = append(cut, span{opener, end})
+		}
+		if end <= i {
+			break
+		}
+		i = end
+	}
+	rest := s
+	for n := len(cut) - 1; n >= 0; n-- {
+		rest = rest[:cut[n].start] + rest[cut[n].end:]
 	}
 	if len(calls) == 0 {
 		t := strings.TrimSpace(s)
