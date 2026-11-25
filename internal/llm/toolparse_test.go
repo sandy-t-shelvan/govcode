@@ -119,6 +119,54 @@ func TestJSONFenceOnlyKnownTools(t *testing.T) {
 	}
 }
 
+// A code fence inside an argument is text. The fence regex used to end the
+// block at the first ``` and repair the cut-off object, so an edit whose
+// new_text contains a markdown sample was written without that sample.
+// A fence that actually ends the JSON string must not be repaired into a
+// truncated edit, and must not run the example call that follows it.
+// Trailing commas and a prose fence before a real call still parse.
+func TestJSONFenceInsideArguments(t *testing.T) {
+	tools := append(testTools, ToolSpec{Name: "run_command", Properties: map[string]Property{
+		"command": {Type: "string"}}, Required: []string{"command"}})
+	newText := "Run it:\n```\nmake test\n```\n\nExample:\n\n```json\n{\"name\":\"run_command\",\"arguments\":{\"command\":\"make\"}}\n```\n"
+	argsJSON, err := json.Marshal(map[string]any{"path": "README.md", "old_text": "intro", "new_text": newText})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Models write the name first. json.Marshal of a map would not.
+	calls, _ := ExtractToolCalls("```json\n{\"name\":\"edit_file\",\"arguments\":"+string(argsJSON)+"}\n```", tools)
+	if len(calls) != 1 || calls[0].Name != "edit_file" {
+		t.Fatalf("got %+v", calls)
+	}
+	if got := args(t, calls[0])["new_text"]; got != newText {
+		t.Fatalf("new_text = %q", got)
+	}
+	// The first fence ends the string, so the object is not JSON. Repairing
+	// it used to write new_text "Run it:\n" and drop the rest.
+	cut := "```json\n" +
+		`{"name":"edit_file","arguments":{"path":"README.md","old_text":"intro","new_text":"Run it:\n` +
+		"```\nmake test\n```\n\nExample:\n\n```json\n" +
+		`{"name":"run_command","arguments":{"command":"make"}}` +
+		"\n```\n\"}}\n```"
+	if calls, _ := ExtractToolCalls(cut, tools); len(calls) != 0 {
+		t.Fatalf("truncated fence was executed: %+v", calls)
+	}
+	// A fence the model simply did not finish has no ``` in the argument, so
+	// the missing brace is still repaired.
+	trunc := "```json\n{\"name\":\"read_file\",\"arguments\":{\"path\":\"a.c\""
+	if calls, _ := ExtractToolCalls(trunc, tools); len(calls) != 1 || calls[0].Name != "read_file" || args(t, calls[0])["path"] != "a.c" {
+		t.Fatalf("truncated fence: %+v", calls)
+	}
+	comma := "```json\n{\"name\": \"read_file\", \"arguments\": {\"path\": \"main.c\",}}\n```"
+	if calls, _ := ExtractToolCalls(comma, tools); len(calls) != 1 || calls[0].Name != "read_file" {
+		t.Fatalf("trailing comma fence: %+v", calls)
+	}
+	prose := "```\nnot a call\n```\n```json\n{\"name\":\"read_file\",\"arguments\":{\"path\":\"a.c\"}}\n```"
+	if calls, _ := ExtractToolCalls(prose, tools); len(calls) != 1 || args(t, calls[0])["path"] != "a.c" {
+		t.Fatalf("prose fence then call: %+v", calls)
+	}
+}
+
 func TestPlainTextNoCalls(t *testing.T) {
 	calls, rest := ExtractToolCalls("The bug is on line 12.", testTools)
 	if len(calls) != 0 || rest != "The bug is on line 12." {
