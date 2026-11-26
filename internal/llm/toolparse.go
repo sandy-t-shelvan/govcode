@@ -28,7 +28,10 @@ func ExtractToolCalls(content string, tools []ToolSpec) ([]ToolCall, string) {
 	for _, t := range tools {
 		known[t.Name] = t
 	}
-	if calls, rest := parseQwenXML(content, known); len(calls) > 0 {
+	// A Qwen reply that contains <function= is handled here even when it
+	// yields no call. Falling through would execute a call that was written
+	// inside an argument after a tag closed the real one early.
+	if calls, rest, ok := parseQwenXML(content, known); ok {
 		return number(calls), rest
 	}
 	if calls, rest := parseHermes(content, known); len(calls) > 0 {
@@ -54,29 +57,86 @@ func number(calls []ToolCall) []ToolCall {
 }
 
 var (
-	reQwenFunc  = regexp.MustCompile(`(?s)<function=([A-Za-z0-9_\-]+)>(.*?)</function>`)
-	reQwenParam = regexp.MustCompile(`(?s)<parameter=([A-Za-z0-9_\-]+)>(.*?)</parameter>`)
-	reToolCall  = regexp.MustCompile(`(?s)<tool_call>(.*?)(?:</tool_call>|$)`)
+	reQwenFunc = regexp.MustCompile(`(?s)<function=([A-Za-z0-9_\-]+)>(.*?)</function>`)
+	reToolCall = regexp.MustCompile(`(?s)<tool_call>(.*?)(?:</tool_call>|$)`)
 )
 
-func parseQwenXML(s string, known map[string]ToolSpec) ([]ToolCall, string) {
+// parseQwenXML reads Qwen3-Coder calls. ok is false when s is not this
+// format. A function whose body is not a list of unique parameters (a
+// </parameter> or <parameter= inside a value, which this format cannot
+// escape) is not a call: the text that follows would otherwise be applied
+// as a different path or a different tool. ok is still true in that case so
+// the caller does not parse the argument again with another format.
+func parseQwenXML(s string, known map[string]ToolSpec) (calls []ToolCall, rest string, ok bool) {
 	if !strings.Contains(s, "<function=") {
-		return nil, s
+		return nil, s, false
 	}
-	var calls []ToolCall
-	for _, m := range reQwenFunc.FindAllStringSubmatch(s, -1) {
-		name := m[1]
-		args := map[string]any{}
-		spec := known[name]
-		for _, p := range reQwenParam.FindAllStringSubmatch(m[2], -1) {
-			args[p[1]] = coerceXMLValue(trimOneNewline(p[2]), spec.Properties[p[1]].Type)
+	matches := reQwenFunc.FindAllStringSubmatch(s, -1)
+	if len(matches) == 0 {
+		return nil, s, false
+	}
+	for _, m := range matches {
+		args, good := qwenParameters(m[2], known[m[1]])
+		if !good {
+			return nil, s, true
 		}
 		b, _ := json.Marshal(args)
-		calls = append(calls, ToolCall{Name: name, Args: b, Source: SourceQwenXML})
+		calls = append(calls, ToolCall{Name: m[1], Args: b, Source: SourceQwenXML})
 	}
-	rest := reToolCall.ReplaceAllString(s, "")
+	rest = reToolCall.ReplaceAllString(s, "")
 	rest = reQwenFunc.ReplaceAllString(rest, "")
-	return calls, strings.TrimSpace(rest)
+	return calls, strings.TrimSpace(rest), true
+}
+
+// qwenParameters reads one <function> body. The body must be only
+// <parameter=name>value</parameter> elements, separated by whitespace, with
+// each name used once. A value is the raw text up to the next </parameter>;
+// this format has no escape, so a tag inside the value is the same byte
+// sequence as the end of the parameter. That call is refused.
+func qwenParameters(body string, spec ToolSpec) (map[string]any, bool) {
+	args := map[string]any{}
+	s := body
+	for {
+		s = strings.TrimLeft(s, " \t\r\n")
+		if s == "" {
+			return args, true
+		}
+		const open = "<parameter="
+		if !strings.HasPrefix(s, open) {
+			return nil, false
+		}
+		name, after, found := strings.Cut(s[len(open):], ">")
+		if !found || !qwenName(name) {
+			return nil, false
+		}
+		if _, dup := args[name]; dup {
+			return nil, false
+		}
+		val, rest, found := strings.Cut(after, "</parameter>")
+		if !found || strings.Contains(val, "<parameter=") {
+			return nil, false
+		}
+		typ := ""
+		if spec.Properties != nil {
+			typ = spec.Properties[name].Type
+		}
+		args[name] = coerceXMLValue(trimOneNewline(val), typ)
+		s = rest
+	}
+}
+
+func qwenName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, c := range name {
+		switch {
+		case c >= 'A' && c <= 'Z', c >= 'a' && c <= 'z', c >= '0' && c <= '9', c == '_', c == '-':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // Qwen3-Coder emits a newline after <parameter=x> and before </parameter>;
