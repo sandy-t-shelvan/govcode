@@ -5,10 +5,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/sandy-t-shelvan/govcode/internal/llm"
@@ -172,7 +174,8 @@ const MemoryFile = "GOVCODE.md"
 
 // memoryFor returns the GOVCODE.md files between the repo root (exclusive,
 // it is loaded into the task prompt) and dir that have not been loaded
-// yet, within the byte budget.
+// yet, within the byte budget. Each file is read through ReadForModel, so
+// a denied path or a symlink out of the repository is left out.
 func (e *Env) memoryFor(relDir string) string {
 	if e.MemoryLoaded == nil {
 		e.MemoryLoaded = map[string]bool{}
@@ -187,7 +190,7 @@ func (e *Env) memoryFor(relDir string) string {
 			continue
 		}
 		e.MemoryLoaded[d] = true
-		data, err := os.ReadFile(filepath.Join(e.Jail.Root, d, MemoryFile))
+		data, err := e.ReadForModel(d + "/" + MemoryFile)
 		if err != nil || len(data) == 0 {
 			continue
 		}
@@ -206,6 +209,100 @@ func (e *Env) memoryFor(relDir string) string {
 		fmt.Fprintf(&b, "[Conventions from %s/%s]\n%s\n[end of conventions]\n\n", d, MemoryFile, strings.TrimSpace(string(data)))
 	}
 	return b.String()
+}
+
+// ReadForModel reads a repository file whose bytes will be shown to the
+// model. A missing file is (nil, nil). The jail applies to the requested
+// name and to the path that will actually be opened, including when an
+// ancestor is a symlink. A target outside the repository or under .git or
+// .govcode is refused. read_file rules apply to both paths, so a
+// conventions file cannot be a back door into a file the model is not
+// allowed to read. The file is opened with O_NOFOLLOW after that path is
+// resolved, so a link swapped in after the check is not followed.
+func (e *Env) ReadForModel(rel string) ([]byte, error) {
+	abs, err := e.Jail.Resolve(rel)
+	if err != nil {
+		e.refuseMemory(rel, err)
+		return nil, err
+	}
+	fi, err := os.Lstat(abs)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		e.refuseMemory(rel, err)
+		return nil, err
+	}
+	// A directory symlink is followed by Lstat for the final component, so
+	// the mode check is not enough: always resolve the path that will be opened.
+	if fi.Mode()&os.ModeSymlink == 0 && !fi.Mode().IsRegular() {
+		return nil, nil
+	}
+	real, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		e.refuseMemory(rel, err)
+		return nil, err
+	}
+	if !e.Jail.within(real) {
+		err = fmt.Errorf("%w: %s (symlink escapes repository)", ErrOutsideRepo, rel)
+		e.refuseMemory(rel, err)
+		return nil, err
+	}
+	rr, relErr := filepath.Rel(e.Jail.Root, real)
+	if relErr != nil {
+		e.refuseMemory(rel, relErr)
+		return nil, relErr
+	}
+	for _, c := range strings.Split(rr, string(filepath.Separator)) {
+		if deniedComponents[c] {
+			err = fmt.Errorf("access to %s is not permitted", c)
+			e.refuseMemory(rel, err)
+			return nil, err
+		}
+	}
+	st, statErr := os.Lstat(real)
+	if statErr != nil {
+		e.refuseMemory(rel, statErr)
+		return nil, statErr
+	}
+	if !st.Mode().IsRegular() {
+		return nil, nil
+	}
+	linkRel := e.Jail.Rel(abs)
+	realRel := e.Jail.Rel(real)
+	// Authorize the bytes that will be read first, then the name the model
+	// asked for. Either denial skips the file.
+	if realRel != linkRel {
+		if err := e.authorize("read_file", realRel); err != nil {
+			e.refuseMemory(rel, err)
+			return nil, err
+		}
+	}
+	if err := e.authorize("read_file", linkRel); err != nil {
+		e.refuseMemory(rel, err)
+		return nil, err
+	}
+	data, err := readNoFollow(real)
+	if err != nil {
+		e.refuseMemory(rel, err)
+		return nil, err
+	}
+	return data, nil
+}
+
+func (e *Env) refuseMemory(rel string, err error) {
+	e.emit("memory_refused", map[string]any{"path": rel, "error": err.Error()})
+}
+
+// readNoFollow opens path and fails if it is a symlink. The caller has
+// already resolved any link it intends to read.
+func readNoFollow(path string) ([]byte, error) {
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return io.ReadAll(f)
 }
 
 func (e *Env) emit(kind string, data any) {
