@@ -222,7 +222,7 @@ func (a *App) execute(ctx context.Context, o RunOptions, st *runstate.State, bac
 	}
 	var memory string
 	if history == nil {
-		memory = a.loadMemory(wt, env, sess)
+		memory = a.loadMemory(env, sess)
 	} else {
 		restoreEnv(st, env)
 	}
@@ -427,14 +427,16 @@ func (a *App) execute(ctx context.Context, o RunOptions, st *runstate.State, bac
 
 // loadMemory reads the site instructions (root-owned, from policy) and
 // the repository's root GOVCODE.md, records their hashes, and marks the
-// root as loaded so read_file only adds subdirectory files.
-func (a *App) loadMemory(wt string, env *tools.Env, sess interface {
+// root as loaded so read_file only adds subdirectory files. The repository
+// file goes through ReadForModel, so a symlink or a read_file denial cannot
+// put a protected file into the task prompt. Site instructions are an
+// administrator path outside the repository and are not jail-checked.
+func (a *App) loadMemory(env *tools.Env, sess interface {
 	Record(string, any) error
 }) string {
 	var b strings.Builder
-	add := func(label, path string) {
-		data, err := os.ReadFile(path)
-		if err != nil || len(data) == 0 {
+	addBytes := func(label string, data []byte) {
+		if len(data) == 0 {
 			return
 		}
 		if len(data) > env.MemoryBudget {
@@ -449,9 +451,13 @@ func (a *App) loadMemory(wt string, env *tools.Env, sess interface {
 		fmt.Fprintf(&b, "[%s]\n%s\n\n", label, strings.TrimSpace(string(data)))
 	}
 	if a.Policy.SiteInstructions != "" {
-		add("site instructions", a.Policy.SiteInstructions)
+		if data, err := os.ReadFile(a.Policy.SiteInstructions); err == nil {
+			addBytes("site instructions", data)
+		}
 	}
-	add(tools.MemoryFile, filepath.Join(wt, tools.MemoryFile))
+	if data, err := env.ReadForModel(tools.MemoryFile); err == nil {
+		addBytes(tools.MemoryFile, data)
+	}
 	env.MemoryLoaded = map[string]bool{".": true}
 	return b.String()
 }

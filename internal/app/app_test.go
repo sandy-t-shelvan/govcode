@@ -134,6 +134,29 @@ func TestRunRefusesOverClassifiedTask(t *testing.T) {
 	}
 }
 
+func TestRootMemorySymlinkNotSentToModel(t *testing.T) {
+	a := world(t)
+	outside := filepath.Join(t.TempDir(), "secret")
+	if err := os.WriteFile(outside, []byte("OUTSIDE-SECRET-MATERIAL"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(a.Repo.Root, "GOVCODE.md")); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"add", "GOVCODE.md"}, {"-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "link"}} {
+		if out, err := exec.Command("git", append([]string{"-C", a.Repo.Root}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %s", args, out)
+		}
+	}
+	m := edit("int port = 3;")
+	if _, err := a.Run(context.Background(), RunOptions{Task: "set port", Backend: m}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(m.Seen[0][1].Content, "OUTSIDE-SECRET-MATERIAL") {
+		t.Fatalf("symlink conventions file reached the model: %q", m.Seen[0][1].Content)
+	}
+}
+
 func TestPreProposalHookBlocks(t *testing.T) {
 	a := world(t)
 	a.Policy.Hooks.PreProposal = []string{"! grep -q 'port = 9' cfg.c"}
